@@ -25,8 +25,8 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: "jobs wajib diisi (minimal 1 lowongan)" });
     }
 
-    // Batasi max 25 jobs sekaligus untuk menghindari timeout
-    const toMatch = jobs.slice(0, 25);
+    // Batasi max 15 jobs — 3 batch × 5 jobs = ~15 detik, jauh di bawah timeout 60s
+    const toMatch = jobs.slice(0, 15);
     const scored = await matchJobs({ cvText: CV_TEXT, jobs: toMatch });
 
     // Sort by score descending
