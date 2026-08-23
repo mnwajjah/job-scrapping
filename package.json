@@ -1,0 +1,12 @@
+{
+  "name": "cocok",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cari lowongan JobStreet + AI job matching, deploy-ready untuk Vercel",
+  "dependencies": {
+    "@google/genai": "^0.15.0",
+    "@sparticuz/chromium": "^131.0.1",
+    "cheerio": "^1.0.0",
+    "puppeteer-core": "^23.11.1"
+  }
+}
