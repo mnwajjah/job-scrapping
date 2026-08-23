@@ -1,8 +1,18 @@
 /**
  * api/search.js — Scrape lowongan dari sumber yang dipilih.
  * Dilindungi JWT auth.
- * POST /api/search { sources[], keyword, location }
+ * POST /api/search { sources[], keyword?, location? }
+ * Keyword OPSIONAL — kalau kosong, pakai auto-keywords dari CV Wajjah.
  */
+
+// Keywords otomatis dari CV Wajjah kalau user tidak isi keyword
+const AUTO_KEYWORDS = [
+  "fullstack developer",
+  "backend developer",
+  "nodejs developer",
+  "react developer",
+  "web developer",
+];
 
 const { BY_ID, SOURCES } = require("../lib/sources");
 const { requireAuth } = require("../lib/auth");
@@ -13,9 +23,11 @@ module.exports = async (req, res) => {
 
   try {
     const { keyword, location, sources } = req.body || {};
-    if (!keyword || !keyword.trim()) {
-      return res.status(400).json({ error: "keyword wajib diisi" });
-    }
+
+    // Keyword opsional — kalau kosong, pakai auto-keywords dari CV
+    const keywords = keyword && keyword.trim()
+      ? [keyword.trim()]
+      : AUTO_KEYWORDS;
 
     const ids = Array.isArray(sources) && sources.length ? sources : ["glints"];
     const selected = ids.map((id) => BY_ID[id]).filter(Boolean);
@@ -23,18 +35,34 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: `Sumber tidak dikenal: ${ids.join(", ")}` });
     }
 
-    const results = await Promise.allSettled(
-      selected.map((src) => src.searchJobs({ keyword, location, maxResults: 20 }))
+    // Scrape semua keyword × semua sumber
+    const allSettled = await Promise.allSettled(
+      keywords.flatMap((kw) =>
+        selected.map((src) => src.searchJobs({ keyword: kw, location, maxResults: 15 }))
+      )
     );
+
+    // Map results back ke source
+    const results = [];
+    let kwIdx = 0, srcIdx = 0;
+    allSettled.forEach((r) => {
+      results.push({ r, src: selected[srcIdx] });
+      srcIdx++;
+      if (srcIdx >= selected.length) { srcIdx = 0; kwIdx++; }
+    });
 
     const jobs = [];
     const errors = [];
-    results.forEach((r, i) => {
-      const src = selected[i];
+    const seenErrors = new Set();
+    results.forEach(({ r, src }) => {
       if (r.status === "fulfilled") {
         jobs.push(...r.value.map((j) => ({ ...j, source: src.id, sourceLabel: src.label })));
       } else {
-        errors.push({ source: src.id, label: src.label, message: r.reason.message, code: r.reason.code || null });
+        // Deduplikasi error per sumber
+        if (!seenErrors.has(src.id)) {
+          seenErrors.add(src.id);
+          errors.push({ source: src.id, label: src.label, message: r.reason.message, code: r.reason.code || null });
+        }
       }
     });
 

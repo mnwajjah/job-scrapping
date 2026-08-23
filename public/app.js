@@ -170,13 +170,16 @@ function selectedSources() {
 // ── Scraping ───────────────────────────────────────────────────────────────
 el.btnScrape.addEventListener("click", async () => {
   clearError();
-  const keyword = el.keyword.value.trim();
-  if (!keyword) { showError("Isi kata kunci dulu."); return; }
   const sources = selectedSources();
   if (sources.length === 0) { showError("Pilih minimal satu sumber."); return; }
 
+  const keyword = el.keyword.value.trim();
+  const isAuto = !keyword;
+
   el.btnScrape.disabled = true;
-  showStatus(`Scraping dari ${sources.length} sumber…`);
+  showStatus(isAuto
+    ? `Scraping otomatis (5 keyword dari CV) di ${sources.length} sumber…`
+    : `Scraping "${keyword}" di ${sources.length} sumber…`);
 
   try {
     const res = await fetch("/api/search", {

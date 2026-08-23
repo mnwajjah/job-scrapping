@@ -240,6 +240,18 @@ body {
 .field-group { display: flex; flex-direction: column; gap: 4px; }
 .field-label { font-size: 11px; color: var(--text-muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
 
+.opt-badge {
+  text-transform: none;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--accent);
+  background: var(--accent-dim);
+  padding: 1px 5px;
+  border-radius: 3px;
+  vertical-align: middle;
+  margin-left: 3px;
+}
+
 /* ── Source Chips ── */
 .source-section {
   display: flex;
