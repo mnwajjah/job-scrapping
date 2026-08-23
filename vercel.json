@@ -1,0 +1,11 @@
+{
+  "functions": {
+    "api/search.js": {
+      "maxDuration": 60,
+      "memory": 1536
+    },
+    "api/match.js": {
+      "maxDuration": 30
+    }
+  }
+}
