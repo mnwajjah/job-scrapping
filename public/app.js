@@ -97,7 +97,12 @@ el.btnSearch.addEventListener("click", async () => {
       body: JSON.stringify({ keyword, location: el.location.value.trim(), sources }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Gagal mengambil data.");
+    if (!res.ok) {
+      const detail = Array.isArray(data.errors) && data.errors.length
+        ? " — " + data.errors.map((e) => `${e.label}: ${e.message}`).join("; ")
+        : "";
+      throw new Error((data.error || "Gagal mengambil data.") + detail);
+    }
 
     state.jobs = data.jobs.map((j) => ({ ...j, matchScore: null }));
     renderJobs();
