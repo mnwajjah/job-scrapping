@@ -40,7 +40,7 @@ module.exports = async (req, res) => {
       const settled = await Promise.allSettled(
         selected.map((src, i) => {
           const kw = AUTO_KEYWORDS[i % AUTO_KEYWORDS.length];
-          return src.searchJobs({ keyword: kw, location: location || "", maxResults: 20 });
+          return src.searchJobs({ keyword: kw, location: location || "", maxResults: 5 });
         })
       );
 
