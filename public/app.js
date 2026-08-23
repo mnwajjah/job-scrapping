@@ -55,6 +55,21 @@ function esc(str) {
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+/**
+ * Parse response sebagai JSON, dengan fallback ke text kalau bukan JSON.
+ * Mencegah crash "Unexpected token 'A'" saat Vercel return HTML error page.
+ */
+async function safeJson(res) {
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    // Server tidak return JSON — kemungkinan timeout/crash
+    const preview = text.slice(0, 150).replace(/<[^>]+>/g, " ").trim();
+    throw new Error(`Server error: ${preview}`);
+  }
+}
+
 function showStatus(text) {
   el.statusText.textContent = text;
   el.statusBar.classList.remove("hidden");
@@ -188,7 +203,7 @@ el.btnScrape.addEventListener("click", async () => {
       body: JSON.stringify({ keyword, location: el.location.value.trim(), sources }),
     });
     if (res.status === 401) { clearToken(); showLogin(); return; }
-    const data = await res.json();
+    const data = await safeJson(res);
     if (!res.ok) throw new Error(data.error || "Gagal scraping.");
 
     state.jobs = data.jobs.map((j) => ({ ...j, matchScore: null }));
@@ -221,7 +236,7 @@ el.btnMatch.addEventListener("click", async () => {
       body: JSON.stringify({ jobs: state.jobs }),
     });
     if (res.status === 401) { clearToken(); showLogin(); return; }
-    const data = await res.json();
+    const data = await safeJson(res);
     if (!res.ok) throw new Error(data.error || "Gagal analisis.");
 
     state.jobs = data.jobs;
