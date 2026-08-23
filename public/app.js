@@ -182,7 +182,34 @@ function selectedSources() {
   return Array.from(el.sourceList.querySelectorAll("input[type=checkbox]:checked")).map((cb) => cb.value);
 }
 
-// ── Scraping ───────────────────────────────────────────────────────────────
+// ── Shared match function (dipanggil otomatis setelah scrape) ──────────────
+async function runMatch() {
+  if (state.jobs.length === 0) return;
+  el.btnMatch.disabled = true;
+  showStatus(`Menganalisis ${state.jobs.length} lowongan dengan AI… (bisa 1-2 menit)`);
+
+  try {
+    const res = await fetch("/api/match", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ jobs: state.jobs }),
+    });
+    if (res.status === 401) { clearToken(); showLogin(); return; }
+    const data = await safeJson(res);
+    if (!res.ok) throw new Error(data.error || "Gagal analisis.");
+
+    state.jobs = data.jobs;
+    renderJobs();
+    updateStats();
+  } catch (err) {
+    showError("Analisis CV gagal: " + err.message);
+  } finally {
+    el.btnMatch.disabled = false;
+    hideStatus();
+  }
+}
+
+// ── Scraping (otomatis lanjut ke match) ────────────────────────────────────
 el.btnScrape.addEventListener("click", async () => {
   clearError();
   const sources = selectedSources();
@@ -193,7 +220,7 @@ el.btnScrape.addEventListener("click", async () => {
 
   el.btnScrape.disabled = true;
   showStatus(isAuto
-    ? `Scraping otomatis (5 keyword dari CV) di ${sources.length} sumber…`
+    ? `Scraping otomatis dari CV di ${sources.length} sumber…`
     : `Scraping "${keyword}" di ${sources.length} sumber…`);
 
   try {
@@ -210,45 +237,27 @@ el.btnScrape.addEventListener("click", async () => {
     renderJobs();
     updateStats();
 
+    // Tampilkan warning sumber gagal tapi jangan blokir flow
     if (data.errors?.length) {
       showError(`Sebagian sumber gagal: ${data.errors.map((e) => `${e.label} (${e.message})`).join("; ")}`);
     }
+
+    // Langsung jalankan AI matching otomatis
+    await runMatch();
+
   } catch (err) {
     showError(err.message);
-  } finally {
     el.btnScrape.disabled = false;
     hideStatus();
+    return;
   }
+
+  el.btnScrape.disabled = false;
 });
 
-// ── AI Match ───────────────────────────────────────────────────────────────
-el.btnMatch.addEventListener("click", async () => {
-  clearError();
-  if (state.jobs.length === 0) return;
+// ── Tombol Match manual (tetap ada untuk re-analisis) ─────────────────────
+el.btnMatch.addEventListener("click", () => runMatch());
 
-  el.btnMatch.disabled = true;
-  showStatus(`Menganalisis ${state.jobs.length} lowongan dengan AI…`);
-
-  try {
-    const res = await fetch("/api/match", {
-      method: "POST",
-      headers: authHeaders(),
-      body: JSON.stringify({ jobs: state.jobs }),
-    });
-    if (res.status === 401) { clearToken(); showLogin(); return; }
-    const data = await safeJson(res);
-    if (!res.ok) throw new Error(data.error || "Gagal analisis.");
-
-    state.jobs = data.jobs;
-    renderJobs();
-    updateStats();
-  } catch (err) {
-    showError(err.message);
-  } finally {
-    el.btnMatch.disabled = false;
-    hideStatus();
-  }
-});
 
 // ── Filter ─────────────────────────────────────────────────────────────────
 document.addEventListener("click", (e) => {
