@@ -1,227 +1,360 @@
+/**
+ * Cocok v2 — Frontend App
+ * Auth flow → Dashboard dengan scrape + AI match otomatis dari CV Wajjah
+ */
+
+const TOKEN_KEY = "cocok_token";
+
+// ── State ──────────────────────────────────────────────────────────────────
 const state = {
-  jobs: [], // { title, company, location, salary, description, url }
-  mode: "scrape",
+  jobs: [],
+  filter: "all",
 };
+
+// ── DOM Refs ───────────────────────────────────────────────────────────────
+const $ = (id) => document.getElementById(id);
 
 const el = {
-  cvText: document.getElementById("cvText"),
-  keyword: document.getElementById("keyword"),
-  location: document.getElementById("location"),
-  sourceList: document.getElementById("sourceList"),
-  btnSearch: document.getElementById("btnSearch"),
-  searchError: document.getElementById("searchError"),
-  manualJobs: document.getElementById("manualJobs"),
-  btnUseManual: document.getElementById("btnUseManual"),
-  jobList: document.getElementById("jobList"),
-  btnMatch: document.getElementById("btnMatch"),
-  matchError: document.getElementById("matchError"),
-  loadingOverlay: document.getElementById("loadingOverlay"),
-  loadingText: document.getElementById("loadingText"),
+  loginPage:    $("loginPage"),
+  dashPage:     $("dashPage"),
+  loginForm:    $("loginForm"),
+  passwordInput:$("passwordInput"),
+  loginError:   $("loginError"),
+  btnLogin:     $("btnLogin"),
+  btnLogout:    $("btnLogout"),
+  keyword:      $("keyword"),
+  location:     $("location"),
+  sourceList:   $("sourceList"),
+  btnScrape:    $("btnScrape"),
+  btnMatch:     $("btnMatch"),
+  statusBar:    $("statusBar"),
+  statusText:   $("statusText"),
+  errorBox:     $("errorBox"),
+  statsRow:     $("statsRow"),
+  statTotal:    $("statTotal"),
+  statMatched:  $("statMatched"),
+  statGood:     $("statGood"),
+  filterRow:    $("filterRow"),
+  jobList:      $("jobList"),
+  emptyState:   $("emptyState"),
+  cronStatus:   $("cronStatus"),
+  cronStatusText:$("cronStatusText"),
 };
 
-// 2026-07-06 muat daftar sumber lowongan, render sebagai chip checkbox
-fetch("/api/sources")
-  .then((r) => r.json())
-  .then((data) => {
-    (data.sources || []).forEach((src, i) => {
-      const label = document.createElement("label");
-      label.className = "source-chip" + (i === 0 ? " checked" : "");
-      label.innerHTML = `<input type="checkbox" value="${src.id}" ${i === 0 ? "checked" : ""}/> ${escapeHtml(src.label)}`;
-      label.querySelector("input").addEventListener("change", (e) => {
-        label.classList.toggle("checked", e.target.checked);
-      });
-      el.sourceList.appendChild(label);
-    });
-  })
-  .catch(() => {});
+// ── Helpers ────────────────────────────────────────────────────────────────
+function getToken() { return localStorage.getItem(TOKEN_KEY); }
+function setToken(t) { localStorage.setItem(TOKEN_KEY, t); }
+function clearToken() { localStorage.removeItem(TOKEN_KEY); }
 
-function selectedSources() {
-  return Array.from(el.sourceList.querySelectorAll('input[type="checkbox"]:checked')).map((cb) => cb.value);
+function authHeaders() {
+  return { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` };
 }
 
-// Prefill CV dengan default-cv.txt kalau ada (bisa diedit bebas)
-fetch("default-cv.txt")
-  .then((r) => (r.ok ? r.text() : ""))
-  .then((text) => {
-    if (text) el.cvText.value = text;
-  })
-  .catch(() => {});
+function esc(str) {
+  return String(str || "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
 
-// --- Tabs ---
-document.querySelectorAll(".tab-btn").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
-    state.mode = btn.dataset.tab;
-    document.getElementById("tab-scrape").classList.toggle("hidden", state.mode !== "scrape");
-    document.getElementById("tab-manual").classList.toggle("hidden", state.mode !== "manual");
-  });
+function showStatus(text) {
+  el.statusText.textContent = text;
+  el.statusBar.classList.remove("hidden");
+}
+function hideStatus() { el.statusBar.classList.add("hidden"); }
+
+function showError(msg) {
+  el.errorBox.textContent = msg;
+  el.errorBox.classList.remove("hidden");
+}
+function clearError() { el.errorBox.classList.add("hidden"); }
+
+// ── Auth ───────────────────────────────────────────────────────────────────
+function showLogin() {
+  el.loginPage.classList.remove("hidden");
+  el.dashPage.classList.add("hidden");
+  el.passwordInput.focus();
+}
+
+function showDash() {
+  el.loginPage.classList.add("hidden");
+  el.dashPage.classList.remove("hidden");
+  initDash();
+}
+
+// Check token on load
+if (getToken()) {
+  showDash();
+} else {
+  showLogin();
+}
+
+// Login form submit
+el.loginForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const pw = el.passwordInput.value.trim();
+  if (!pw) return;
+
+  el.loginError.classList.add("hidden");
+  el.btnLogin.disabled = true;
+  el.btnLogin.textContent = "Memproses…";
+
+  try {
+    const res = await fetch("/api/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: pw }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Login gagal.");
+    setToken(data.token);
+    showDash();
+  } catch (err) {
+    el.loginError.textContent = err.message;
+    el.loginError.classList.remove("hidden");
+  } finally {
+    el.btnLogin.disabled = false;
+    el.btnLogin.textContent = "Masuk";
+    el.passwordInput.value = "";
+  }
 });
 
-function showLoading(text) {
-  el.loadingText.textContent = text;
-  el.loadingOverlay.classList.remove("hidden");
-}
-function hideLoading() {
-  el.loadingOverlay.classList.add("hidden");
+// Logout
+el.btnLogout.addEventListener("click", () => {
+  clearToken();
+  showLogin();
+});
+
+// ── Dashboard Init ─────────────────────────────────────────────────────────
+function initDash() {
+  loadSources();
+  updateEmptyState();
 }
 
-function showError(node, message) {
-  node.textContent = message;
-  node.classList.remove("hidden");
-}
-function clearError(node) {
-  node.classList.add("hidden");
-  node.textContent = "";
+// Load sumber lowongan
+async function loadSources() {
+  try {
+    const res = await fetch("/api/sources", { headers: authHeaders() });
+    if (res.status === 401) { clearToken(); showLogin(); return; }
+    const data = await res.json();
+    renderSourceChips(data.sources || []);
+  } catch { /* skip */ }
 }
 
-// --- Mode 1: Scraping otomatis ---
-el.btnSearch.addEventListener("click", async () => {
-  clearError(el.searchError);
+function renderSourceChips(sources) {
+  el.sourceList.innerHTML = "";
+  sources.forEach((src, i) => {
+    const wrap = document.createElement("div");
+    wrap.className = "chip" + (src.usePuppeteer ? " chip-puppet" : "");
+
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.id = `src_${src.id}`;
+    cb.value = src.id;
+    // Default checked: semua non-puppeteer + glints
+    cb.checked = !src.usePuppeteer;
+
+    const lbl = document.createElement("label");
+    lbl.htmlFor = `src_${src.id}`;
+    lbl.title = src.note || src.label;
+    lbl.textContent = src.label;
+
+    wrap.appendChild(cb);
+    wrap.appendChild(lbl);
+    el.sourceList.appendChild(wrap);
+  });
+}
+
+function selectedSources() {
+  return Array.from(el.sourceList.querySelectorAll("input[type=checkbox]:checked")).map((cb) => cb.value);
+}
+
+// ── Scraping ───────────────────────────────────────────────────────────────
+el.btnScrape.addEventListener("click", async () => {
+  clearError();
   const keyword = el.keyword.value.trim();
-  if (!keyword) {
-    showError(el.searchError, "Isi kata kunci pencarian dulu.");
-    return;
-  }
+  if (!keyword) { showError("Isi kata kunci dulu."); return; }
   const sources = selectedSources();
-  if (sources.length === 0) {
-    showError(el.searchError, "Pilih minimal satu sumber lowongan.");
-    return;
-  }
+  if (sources.length === 0) { showError("Pilih minimal satu sumber."); return; }
 
-  showLoading(`Mencari lowongan di ${sources.length} sumber…`);
+  el.btnScrape.disabled = true;
+  showStatus(`Scraping dari ${sources.length} sumber…`);
+
   try {
     const res = await fetch("/api/search", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders(),
       body: JSON.stringify({ keyword, location: el.location.value.trim(), sources }),
     });
+    if (res.status === 401) { clearToken(); showLogin(); return; }
     const data = await res.json();
-    if (!res.ok) {
-      const detail = Array.isArray(data.errors) && data.errors.length
-        ? " — " + data.errors.map((e) => `${e.label}: ${e.message}`).join("; ")
-        : "";
-      throw new Error((data.error || "Gagal mengambil data.") + detail);
-    }
+    if (!res.ok) throw new Error(data.error || "Gagal scraping.");
 
     state.jobs = data.jobs.map((j) => ({ ...j, matchScore: null }));
     renderJobs();
-    if (data.errors && data.errors.length) {
-      showError(
-        el.searchError,
-        `Sebagian sumber gagal: ${data.errors.map((e) => `${e.label} (${e.message})`).join("; ")}`
-      );
+    updateStats();
+
+    if (data.errors?.length) {
+      showError(`Sebagian sumber gagal: ${data.errors.map((e) => `${e.label} (${e.message})`).join("; ")}`);
     }
   } catch (err) {
-    showError(
-      el.searchError,
-      `${err.message} — coba tab "Tempel manual" sebagai alternatif.`
-    );
+    showError(err.message);
   } finally {
-    hideLoading();
+    el.btnScrape.disabled = false;
+    hideStatus();
   }
 });
 
-// --- Mode 2: Tempel manual ---
-el.btnUseManual.addEventListener("click", () => {
-  const raw = el.manualJobs.value.trim();
-  if (!raw) return;
-
-  const blocks = raw.split(/\n-{3,}\n/).map((b) => b.trim()).filter(Boolean);
-  state.jobs = blocks.map((block) => {
-    const lines = block.split("\n").map((l) => l.trim()).filter(Boolean);
-    return {
-      title: lines[0] || "(tanpa judul)",
-      company: null,
-      location: lines[1] || null,
-      description: lines.slice(2).join(" ") || lines.slice(1).join(" "),
-      url: null,
-      matchScore: null,
-    };
-  });
-  renderJobs();
-});
-
-// --- Render daftar lowongan ---
-function renderJobs() {
-  el.jobList.innerHTML = "";
-  el.btnMatch.classList.toggle("hidden", state.jobs.length === 0);
-
-  state.jobs.forEach((job, i) => {
-    const card = document.createElement("div");
-    card.className = "job-card" + (job.matchScore !== null ? " scored" : "");
-
-    const titleHtml = job.url
-      ? `<a href="${job.url}" target="_blank" rel="noopener">${escapeHtml(job.title)}</a>`
-      : escapeHtml(job.title);
-
-    const scorePill =
-      job.matchScore !== null
-        ? `<span class="score-pill ${scoreClass(job.matchScore)}">${job.matchScore}</span>`
-        : "";
-
-    const reasoning = job.reasoning ? `<p class="job-reasoning">${escapeHtml(job.reasoning)}</p>` : "";
-
-    const tags = [
-      ...(job.strengths || []).map((s) => `<span class="tag strength">${escapeHtml(s)}</span>`),
-      ...(job.gaps || []).map((g) => `<span class="tag gap">${escapeHtml(g)}</span>`),
-    ].join("");
-
-    const sourceBadge = job.sourceLabel ? `<span class="tag">${escapeHtml(job.sourceLabel)}</span>` : "";
-
-    card.innerHTML = `
-      <div class="job-card-top">
-        <div>
-          <p class="job-title">${titleHtml} ${sourceBadge}</p>
-          <p class="job-meta">${[job.company, job.location, job.salary].filter(Boolean).map(escapeHtml).join(" · ")}</p>
-        </div>
-        ${scorePill}
-      </div>
-      ${reasoning}
-      ${tags ? `<div class="tag-row">${tags}</div>` : ""}
-    `;
-    el.jobList.appendChild(card);
-  });
-}
-
-function scoreClass(score) {
-  if (score >= 70) return "";
-  if (score >= 40) return "mid";
-  return "low";
-}
-
-function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-// --- Cocokkan dengan CV ---
+// ── AI Match ───────────────────────────────────────────────────────────────
 el.btnMatch.addEventListener("click", async () => {
-  clearError(el.matchError);
-  const cvText = el.cvText.value.trim();
-  if (!cvText) {
-    showError(el.matchError, "Kotak CV di sebelah kiri masih kosong.");
-    return;
-  }
+  clearError();
   if (state.jobs.length === 0) return;
 
-  showLoading(`Menilai kecocokan ${state.jobs.length} lowongan dengan AI…`);
+  el.btnMatch.disabled = true;
+  showStatus(`Menganalisis ${state.jobs.length} lowongan dengan AI…`);
+
   try {
     const res = await fetch("/api/match", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cvText, jobs: state.jobs }),
+      headers: authHeaders(),
+      body: JSON.stringify({ jobs: state.jobs }),
     });
+    if (res.status === 401) { clearToken(); showLogin(); return; }
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Gagal menilai kecocokan.");
+    if (!res.ok) throw new Error(data.error || "Gagal analisis.");
 
     state.jobs = data.jobs;
     renderJobs();
+    updateStats();
   } catch (err) {
-    showError(el.matchError, err.message);
+    showError(err.message);
   } finally {
-    hideLoading();
+    el.btnMatch.disabled = false;
+    hideStatus();
   }
 });
+
+// ── Filter ─────────────────────────────────────────────────────────────────
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest(".filter-btn");
+  if (!btn) return;
+  document.querySelectorAll(".filter-btn").forEach((b) => b.classList.remove("active"));
+  btn.classList.add("active");
+  state.filter = btn.dataset.filter;
+  renderJobs();
+});
+
+function filteredJobs() {
+  switch (state.filter) {
+    case "high":     return state.jobs.filter((j) => j.matchScore !== null && j.matchScore >= 70);
+    case "mid":      return state.jobs.filter((j) => j.matchScore !== null && j.matchScore >= 50 && j.matchScore < 70);
+    case "low":      return state.jobs.filter((j) => j.matchScore !== null && j.matchScore < 50);
+    case "unscored": return state.jobs.filter((j) => j.matchScore === null);
+    default:         return state.jobs;
+  }
+}
+
+// ── Render Jobs ────────────────────────────────────────────────────────────
+function renderJobs() {
+  el.jobList.innerHTML = "";
+  el.btnMatch.classList.toggle("hidden", state.jobs.length === 0);
+  el.filterRow.classList.toggle("hidden", state.jobs.length === 0);
+  el.statsRow.classList.toggle("hidden", state.jobs.length === 0);
+  updateEmptyState();
+
+  const visible = filteredJobs();
+  visible.forEach((job, idx) => {
+    el.jobList.appendChild(buildJobCard(job, idx));
+  });
+}
+
+function buildJobCard(job, idx) {
+  const card = document.createElement("div");
+  const hasScore = job.matchScore !== null;
+
+  let scoreClass = "none";
+  if (hasScore) {
+    if (job.matchScore >= 70) scoreClass = "high";
+    else if (job.matchScore >= 50) scoreClass = "mid";
+    else scoreClass = "low";
+  }
+
+  card.className = `job-card${hasScore ? ` scored-${scoreClass}` : ""}`;
+  card.dataset.idx = idx;
+
+  const titleHtml = job.url
+    ? `<a href="${esc(job.url)}" target="_blank" rel="noopener">${esc(job.title)}</a>`
+    : esc(job.title);
+
+  const meta = [job.company, job.location, job.salary].filter(Boolean).map(esc).join(" · ");
+
+  // Score circle
+  const scoreHtml = `
+    <div class="score-pill">
+      <div class="score-circle ${scoreClass}">
+        ${hasScore ? job.matchScore + "%" : "—"}
+      </div>
+      ${hasScore ? `<div class="score-label">${esc(job.chanceLabel || "")}</div>` : ""}
+    </div>`;
+
+  // Tech tags
+  let detailsHtml = "";
+  if (hasScore && job.techStackMatch) {
+    const matched = (job.techStackMatch.matched || []).map((t) => `<span class="tech-tag match">✓ ${esc(t)}</span>`).join("");
+    const learn = (job.techStackMatch.canLearn || []).map((t) => `<span class="tech-tag learn">📚 ${esc(t)}</span>`).join("");
+    const missing = (job.techStackMatch.missing || []).map((t) => `<span class="tech-tag missing">✗ ${esc(t)}</span>`).join("");
+
+    const recClass = job.matchScore >= 70 ? "rec-apply" : job.matchScore >= 50 ? "rec-consider" : "rec-skip";
+
+    detailsHtml = `
+      <div class="job-details">
+        <div class="detail-row">
+          <div class="detail-block">
+            <div class="detail-title">Tech Stack</div>
+            <div class="tech-tags">${matched}${learn}${missing}</div>
+          </div>
+          <div class="detail-block">
+            <div class="detail-title">Analisis</div>
+            <p class="reasoning-text">${esc(job.reasoning || "")}</p>
+            ${job.recommendation ? `<span class="recommendation-badge ${recClass}">${esc(job.recommendation)}</span>` : ""}
+          </div>
+        </div>
+      </div>`;
+  }
+
+  card.innerHTML = `
+    <div class="job-card-top">
+      <div class="job-main">
+        <div class="job-title">
+          ${titleHtml}
+          <span class="source-tag">${esc(job.sourceLabel || "")}</span>
+        </div>
+        ${meta ? `<div class="job-meta">${meta}</div>` : ""}
+        ${hasScore ? `<button class="toggle-details">Detail ▾</button>` : ""}
+      </div>
+      ${scoreHtml}
+    </div>
+    ${detailsHtml}`;
+
+  // Toggle detail
+  const toggleBtn = card.querySelector(".toggle-details");
+  if (toggleBtn) {
+    toggleBtn.addEventListener("click", () => {
+      card.classList.toggle("expanded");
+      toggleBtn.textContent = card.classList.contains("expanded") ? "Tutup ▴" : "Detail ▾";
+    });
+  }
+
+  return card;
+}
+
+// ── Stats Update ───────────────────────────────────────────────────────────
+function updateStats() {
+  const scored = state.jobs.filter((j) => j.matchScore !== null);
+  const good = scored.filter((j) => j.matchScore >= 70);
+  el.statTotal.textContent = state.jobs.length;
+  el.statMatched.textContent = scored.length;
+  el.statGood.textContent = good.length;
+}
+
+function updateEmptyState() {
+  el.emptyState.classList.toggle("hidden", state.jobs.length > 0);
+}

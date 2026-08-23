@@ -1,9 +1,17 @@
+/**
+ * api/match.js — AI matching jobs dengan CV Wajjah.
+ * Dilindungi JWT auth.
+ * POST /api/match { jobs[] } → { jobs[] with matchScore, techStackMatch, etc }
+ * CV otomatis dari lib/cv.js — tidak perlu kirim cvText dari client.
+ */
+
 const { matchJobs } = require("../lib/matcher");
+const { requireAuth } = require("../lib/auth");
+const { CV_TEXT } = require("../lib/cv");
 
 module.exports = async (req, res) => {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method tidak diizinkan" });
-  }
+  if (req.method !== "POST") return res.status(405).json({ error: "Method tidak diizinkan" });
+  if (!requireAuth(req, res)) return;
 
   try {
     if (!process.env.GEMINI_API_KEY) {
@@ -11,14 +19,19 @@ module.exports = async (req, res) => {
         error: "GEMINI_API_KEY belum diset di Environment Variables Vercel.",
       });
     }
-    const { cvText, jobs } = req.body || {};
-    if (!cvText || !cvText.trim()) {
-      return res.status(400).json({ error: "cvText wajib diisi" });
-    }
+
+    const { jobs } = req.body || {};
     if (!Array.isArray(jobs) || jobs.length === 0) {
       return res.status(400).json({ error: "jobs wajib diisi (minimal 1 lowongan)" });
     }
-    const scored = await matchJobs({ cvText, jobs });
+
+    // Batasi max 25 jobs sekaligus untuk menghindari timeout
+    const toMatch = jobs.slice(0, 25);
+    const scored = await matchJobs({ cvText: CV_TEXT, jobs: toMatch });
+
+    // Sort by score descending
+    scored.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
+
     res.status(200).json({ jobs: scored });
   } catch (err) {
     console.error(err);

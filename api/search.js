@@ -1,10 +1,15 @@
-// 2026-07-06 support multi-source: jobstreet, hennge, glints, mercari
-const { BY_ID } = require("../lib/sources");
+/**
+ * api/search.js — Scrape lowongan dari sumber yang dipilih.
+ * Dilindungi JWT auth.
+ * POST /api/search { sources[], keyword, location }
+ */
+
+const { BY_ID, SOURCES } = require("../lib/sources");
+const { requireAuth } = require("../lib/auth");
 
 module.exports = async (req, res) => {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method tidak diizinkan" });
-  }
+  if (req.method !== "POST") return res.status(405).json({ error: "Method tidak diizinkan" });
+  if (!requireAuth(req, res)) return;
 
   try {
     const { keyword, location, sources } = req.body || {};
@@ -12,10 +17,10 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: "keyword wajib diisi" });
     }
 
-    const ids = Array.isArray(sources) && sources.length ? sources : ["jobstreet"];
+    const ids = Array.isArray(sources) && sources.length ? sources : ["glints"];
     const selected = ids.map((id) => BY_ID[id]).filter(Boolean);
     if (selected.length === 0) {
-      return res.status(400).json({ error: `sumber tidak dikenal: ${ids.join(", ")}` });
+      return res.status(400).json({ error: `Sumber tidak dikenal: ${ids.join(", ")}` });
     }
 
     const results = await Promise.allSettled(
@@ -37,9 +42,12 @@ module.exports = async (req, res) => {
       return res.status(500).json({ error: "Semua sumber gagal.", errors });
     }
 
-    res.status(200).json({ jobs, errors });
+    // Deduplikasi by URL
+    const deduped = Array.from(new Map(jobs.filter((j) => j.url).map((j) => [j.url, j])).values());
+
+    res.status(200).json({ jobs: deduped, errors });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: err.message, code: err.code || null });
+    res.status(500).json({ error: err.message });
   }
 };

@@ -1,12 +1,16 @@
 {
   "name": "cocok",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "Cari lowongan JobStreet + AI job matching, deploy-ready untuk Vercel",
+  "description": "Job scraper otomatis berbasis CV — AI matching probabilistik, cron email, multi-source",
   "dependencies": {
     "@google/genai": "^0.15.0",
     "@sparticuz/chromium": "^131.0.1",
     "cheerio": "^1.0.0",
+    "jsonwebtoken": "^9.0.2",
     "puppeteer-core": "^23.11.1"
+  },
+  "scripts": {
+    "dev": "node server.js"
   }
 }
