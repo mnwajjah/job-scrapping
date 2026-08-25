@@ -11,9 +11,13 @@
 
 const { BY_ID } = require("../lib/sources");
 const { requireAuth } = require("../lib/auth");
+const { insertNewJob } = require("../lib/jobs-store");
+const { migrate } = require("../lib/db");
 
 // Keywords ringkas untuk auto-mode (urut dari paling broad)
 const AUTO_KEYWORDS = ["developer", "fullstack", "backend", "nodejs"];
+
+let dbReady = false;
 
 module.exports = async (req, res) => {
   if (req.method !== "POST") return res.status(405).json({ error: "Method tidak diizinkan" });
@@ -32,7 +36,6 @@ module.exports = async (req, res) => {
     const jobs = [];
     const errors = [];
     const seenUrls = new Set();
-    const seenErrorSources = new Set();
 
     if (isAuto) {
       // AUTO MODE: tiap sumber scrape dengan 1 keyword saja (rotasi per sumber)
@@ -85,6 +88,22 @@ module.exports = async (req, res) => {
           : `Tidak ada lowongan untuk "${keyword}". Coba kata kunci lain.`,
         errors,
       });
+    }
+
+    // Save to DB in background
+    if (jobs.length > 0) {
+      try {
+        if (!dbReady) { await migrate(); dbReady = true; }
+        await Promise.all(
+          jobs.map((j) =>
+            insertNewJob(j).catch((err) =>
+              console.warn(`[search] Gagal simpan ke DB (${j.url}):`, err.message)
+            )
+          )
+        );
+      } catch (dbErr) {
+        console.error("[search] DB migration/insertion failed:", dbErr.message);
+      }
     }
 
     res.status(200).json({ jobs, errors: errors.length ? errors : undefined, isAuto });

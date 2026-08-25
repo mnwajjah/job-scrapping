@@ -56,8 +56,8 @@ const server = http.createServer(async (req, res) => {
 
   // API routes
   if (pathname.startsWith("/api/")) {
-    const segment = pathname.slice(5).split("/")[0]; // e.g. "auth", "search"
-    const handlerPath = path.join(__dirname, "api", `${segment}.js`);
+    const apiPath = pathname.slice(5); // e.g. "cron/scrape" or "auth"
+    const handlerPath = path.join(__dirname, "api", apiPath.endsWith(".js") ? apiPath : `${apiPath}.js`);
     if (fs.existsSync(handlerPath)) {
       delete require.cache[require.resolve(handlerPath)];
       const handler = require(handlerPath);
