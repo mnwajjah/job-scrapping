@@ -580,3 +580,39 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #444; }
+
+/* ── Main Tabs ── */
+.main-tabs { display:flex; gap:4px; padding:12px 24px 0; border-bottom:1px solid var(--border); background:var(--surface); }
+.tab-btn { background:none; border:none; color:var(--text-muted); font-size:13px; font-weight:500; padding:8px 16px; cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px; border-radius:4px 4px 0 0; transition:color 0.15s; font-family:var(--font); }
+.tab-btn:hover { color:var(--text); }
+.tab-btn.active { color:var(--accent); border-bottom-color:var(--accent); }
+.tab-pane.hidden { display:none; }
+
+/* ── Tracker Stats ── */
+.tracker-stats { display:flex; gap:12px; flex-wrap:wrap; padding:16px 0; margin-bottom:4px; }
+.tracker-stat-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:12px 18px; min-width:90px; text-align:center; }
+.tracker-stat-num { font-size:22px; font-weight:700; display:block; color:var(--text); }
+.tracker-stat-num.green { color:var(--green); }
+.tracker-stat-num.yellow { color:var(--yellow); }
+.tracker-stat-num.blue { color:var(--accent); }
+.tracker-stat-num.purple { color:#a78bfa; }
+.tracker-stat-lbl { font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-top:2px; display:block; }
+
+/* ── Status action buttons ── */
+.status-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; padding-top:10px; border-top:1px solid var(--border); }
+.status-btn { font-size:11px; font-weight:500; padding:4px 10px; border-radius:20px; border:1px solid var(--border); background:var(--surface2); color:var(--text-muted); cursor:pointer; transition:all 0.15s; font-family:var(--font); }
+.status-btn:hover { border-color:var(--accent); color:var(--text); }
+.status-btn.active-applied   { background:#1e3a5f; border-color:var(--accent); color:var(--accent); }
+.status-btn.active-interview { background:#2e1a5f; border-color:#a78bfa; color:#a78bfa; }
+.status-btn.active-offered   { background:#14532d; border-color:var(--green); color:var(--green); }
+.status-btn.active-rejected  { background:#450a0a; border-color:var(--red); color:var(--red); }
+.status-btn.active-skipped   { background:#1c1c1c; border-color:#374151; color:#6b7280; }
+
+/* ── Status badges ── */
+.app-status-badge { display:inline-block; font-size:11px; font-weight:600; padding:2px 8px; border-radius:20px; text-transform:uppercase; letter-spacing:0.4px; }
+.badge-pending   { background:#1c1c1c; color:#6b7280; border:1px solid #374151; }
+.badge-applied   { background:#1e3a5f; color:var(--accent); border:1px solid var(--accent-dim); }
+.badge-interview { background:#2e1a5f; color:#a78bfa; border:1px solid #4c1d95; }
+.badge-offered   { background:#14532d; color:var(--green); border:1px solid #166534; }
+.badge-rejected  { background:#450a0a; color:var(--red); border:1px solid #7f1d1d; }
+.badge-skipped   { background:#111; color:#374151; border:1px solid #1f2937; }

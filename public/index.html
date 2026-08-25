@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Cocok — Job Matcher Otomatis</title>
-  <meta name="description" content="Dashboard job scraping otomatis berbasis CV Muhammad Nur Wajjah. AI matching probabilistik untuk peluang lolos kerja." />
+  <meta name="description" content="Dashboard job scraping otomatis berbasis CV Muhammad Nur Wajjah." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
@@ -18,17 +18,10 @@
       <h1 class="login-title">Cocok</h1>
       <p class="login-sub">Job Scraper Otomatis</p>
       <form id="loginForm" autocomplete="off">
-        <input
-          id="passwordInput"
-          type="password"
-          class="input-field"
-          placeholder="Masukkan password"
-          autocomplete="current-password"
-        />
+        <input id="passwordInput" type="password" class="input-field"
+          placeholder="Masukkan password" autocomplete="current-password" />
         <div id="loginError" class="error-text hidden"></div>
-        <button type="submit" id="btnLogin" class="btn-primary full-width">
-          Masuk
-        </button>
+        <button type="submit" id="btnLogin" class="btn-primary full-width">Masuk</button>
       </form>
     </div>
   </div>
@@ -43,7 +36,7 @@
         <span class="brand-name">Cocok</span>
       </div>
       <div class="header-right">
-        <div id="cronStatus" class="cron-badge" title="Status cron terakhir">
+        <div id="cronStatus" class="cron-badge" title="Status cron">
           <span class="cron-dot"></span>
           <span id="cronStatusText">Cron aktif</span>
         </div>
@@ -51,83 +44,126 @@
       </div>
     </header>
 
-    <!-- Main Content -->
+    <!-- Main Tabs -->
+    <nav class="main-tabs">
+      <button class="tab-btn active" data-tab="scrape">🔍 Scrape</button>
+      <button class="tab-btn" data-tab="tracker">📋 Tracker</button>
+    </nav>
+
     <main class="main">
 
-      <!-- Controls Bar -->
-      <div class="controls-bar">
-        <div class="controls-left">
-          <div class="field-group">
-            <label class="field-label" for="keyword">Kata kunci <span class="opt-badge">opsional</span></label>
-            <input id="keyword" type="text" class="input-sm" placeholder="Kosongkan = otomatis dari CV" />
+      <!-- ══ TAB: SCRAPE ══════════════════════════════════════════════ -->
+      <div id="tabScrape" class="tab-pane">
+
+        <!-- Controls Bar -->
+        <div class="controls-bar">
+          <div class="controls-left">
+            <div class="field-group">
+              <label class="field-label" for="keyword">Kata kunci <span class="opt-badge">opsional</span></label>
+              <input id="keyword" type="text" class="input-sm" placeholder="Kosongkan = otomatis dari CV" />
+            </div>
+            <div class="field-group">
+              <label class="field-label" for="location">Lokasi</label>
+              <input id="location" type="text" class="input-sm" placeholder="Remote / Batam / Tokyo" />
+            </div>
           </div>
-          <div class="field-group">
-            <label class="field-label" for="location">Lokasi</label>
-            <input id="location" type="text" class="input-sm" placeholder="Remote / Batam / Tokyo" />
+          <div class="controls-right">
+            <button id="btnScrape" class="btn-primary">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+              Scrape Sekarang
+            </button>
+            <button id="btnMatch" class="btn-accent hidden">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+              Analisis CV
+            </button>
           </div>
         </div>
-        <div class="controls-right">
-          <button id="btnScrape" class="btn-primary">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-            Scrape Sekarang
-          </button>
-          <button id="btnMatch" class="btn-accent hidden">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
-            Analisis CV
-          </button>
+
+        <!-- Source chips -->
+        <div class="source-section">
+          <span class="source-label">Sumber:</span>
+          <div id="sourceList" class="source-chips"></div>
+        </div>
+
+        <!-- Status bar -->
+        <div id="statusBar" class="status-bar hidden">
+          <span id="statusText">Memproses…</span>
+          <div class="mini-spinner"></div>
+        </div>
+
+        <!-- Error -->
+        <div id="errorBox" class="error-box hidden"></div>
+
+        <!-- Stats row -->
+        <div id="statsRow" class="stats-row hidden">
+          <div class="stat-item">
+            <span class="stat-num" id="statTotal">0</span>
+            <span class="stat-lbl">Lowongan</span>
+          </div>
+          <div class="stat-sep"></div>
+          <div class="stat-item">
+            <span class="stat-num" id="statMatched">0</span>
+            <span class="stat-lbl">Dianalisis</span>
+          </div>
+          <div class="stat-sep"></div>
+          <div class="stat-item">
+            <span class="stat-num stat-green" id="statGood">0</span>
+            <span class="stat-lbl">Skor ≥ 70%</span>
+          </div>
+        </div>
+
+        <!-- Filter tabs -->
+        <div id="filterRow" class="filter-row hidden">
+          <button class="filter-btn active" data-filter="all">Semua</button>
+          <button class="filter-btn" data-filter="high">Tinggi (≥70%)</button>
+          <button class="filter-btn" data-filter="mid">Sedang (50-69%)</button>
+          <button class="filter-btn" data-filter="low">Rendah (&lt;50%)</button>
+          <button class="filter-btn" data-filter="unscored">Belum dianalisis</button>
+        </div>
+
+        <!-- Job List -->
+        <div id="jobList" class="job-list"></div>
+
+        <!-- Empty state -->
+        <div id="emptyState" class="empty-state">
+          <div class="empty-icon">🔍</div>
+          <p>Pilih sumber dan klik <strong>Scrape Sekarang</strong> untuk mulai.</p>
+          <p class="empty-sub">Biarkan kata kunci <em>kosong</em> → sistem otomatis scrape berdasarkan CV kamu.<br/>Cron otomatis scrape &amp; kirim email tiap 5 menit.</p>
         </div>
       </div>
 
-      <!-- Source chips -->
-      <div class="source-section">
-        <span class="source-label">Sumber:</span>
-        <div id="sourceList" class="source-chips"></div>
-      </div>
+      <!-- ══ TAB: TRACKER ════════════════════════════════════════════ -->
+      <div id="tabTracker" class="tab-pane hidden">
 
-      <!-- Status bar -->
-      <div id="statusBar" class="status-bar hidden">
-        <span id="statusText">Memproses…</span>
-        <div class="mini-spinner"></div>
-      </div>
+        <!-- Tracker stats -->
+        <div id="trackerStats" class="tracker-stats"></div>
 
-      <!-- Error -->
-      <div id="errorBox" class="error-box hidden"></div>
-
-      <!-- Stats row -->
-      <div id="statsRow" class="stats-row hidden">
-        <div class="stat-item">
-          <span class="stat-num" id="statTotal">0</span>
-          <span class="stat-lbl">Lowongan</span>
+        <!-- Tracker filter -->
+        <div class="filter-row" style="margin-bottom:16px">
+          <button class="tracker-filter active" data-status="all">Semua</button>
+          <button class="tracker-filter" data-status="pending">⏳ Pending</button>
+          <button class="tracker-filter" data-status="applied">📤 Applied</button>
+          <button class="tracker-filter" data-status="interview">💬 Interview</button>
+          <button class="tracker-filter" data-status="offered">🎉 Offered</button>
+          <button class="tracker-filter" data-status="rejected">❌ Rejected</button>
+          <button class="tracker-filter" data-status="skipped">🚫 Skip</button>
         </div>
-        <div class="stat-sep"></div>
-        <div class="stat-item">
-          <span class="stat-num" id="statMatched">0</span>
-          <span class="stat-lbl">Sudah dianalisis</span>
+
+        <!-- Tracker status bar -->
+        <div id="trackerStatusBar" class="status-bar hidden">
+          <span id="trackerStatusText">Memuat…</span>
+          <div class="mini-spinner"></div>
         </div>
-        <div class="stat-sep"></div>
-        <div class="stat-item">
-          <span class="stat-num stat-green" id="statGood">0</span>
-          <span class="stat-lbl">Skor ≥ 70%</span>
+
+        <!-- Tracker list -->
+        <div id="trackerList" class="job-list"></div>
+
+        <!-- Tracker empty -->
+        <div id="trackerEmpty" class="empty-state hidden">
+          <div class="empty-icon">📋</div>
+          <p>Belum ada data di tracker.</p>
+          <p class="empty-sub">Cron otomatis akan mengisi data ini setiap 5 menit.</p>
         </div>
-      </div>
-
-      <!-- Filter tabs -->
-      <div id="filterRow" class="filter-row hidden">
-        <button class="filter-btn active" data-filter="all">Semua</button>
-        <button class="filter-btn" data-filter="high">Tinggi (≥70%)</button>
-        <button class="filter-btn" data-filter="mid">Sedang (50-69%)</button>
-        <button class="filter-btn" data-filter="low">Rendah (&lt;50%)</button>
-        <button class="filter-btn" data-filter="unscored">Belum dianalisis</button>
-      </div>
-
-      <!-- Job List -->
-      <div id="jobList" class="job-list"></div>
-
-      <!-- Empty state -->
-      <div id="emptyState" class="empty-state">
-        <div class="empty-icon">🔍</div>
-        <p>Pilih sumber dan klik <strong>Scrape Sekarang</strong> untuk mulai.</p>
-        <p class="empty-sub">Biarkan kata kunci <em>kosong</em> → sistem otomatis scrape berdasarkan CV kamu.<br/>Cron otomatis akan scrape &amp; kirim email tiap 5 menit.</p>
       </div>
 
     </main>

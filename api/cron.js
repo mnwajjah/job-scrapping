@@ -1,126 +1,150 @@
 /**
- * api/cron.js — Endpoint yang dipanggil cron-job.org tiap 5 menit.
- * Dilindungi header x-cron-secret (diset di env CRON_SECRET).
+ * api/cron.js — Dipanggil cron-job.org tiap 5 menit.
+ * Dilindungi x-cron-secret header.
  *
- * Flow:
- * 1. Validasi x-cron-secret
- * 2. Scrape semua sumber (non-Puppeteer) dengan keyword dari CV Wajjah
- * 3. Match dengan CV Wajjah via AI
- * 4. Filter job dengan score >= 50
- * 5. Kirim email kalau ada job baru
+ * FLOW:
+ *  1. Respond 200 LANGSUNG → cron-job.org tidak timeout
+ *  2. Background: scrape → AI match → upsert DB → email baru → reminder
  */
 
 const { CRON_SOURCES } = require("../lib/sources");
-const { matchJobs } = require("../lib/matcher");
-const { sendJobEmail } = require("../lib/emailer");
-const { CV_TEXT } = require("../lib/cv");
+const { matchJobs }    = require("../lib/matcher");
+const { CV_TEXT }      = require("../lib/cv");
+const {
+  upsertJob, getUnnotified, markNotified,
+  getReminderCandidates, markReminderSent,
+} = require("../lib/jobs-store");
+const { migrate }            = require("../lib/db");
+const { sendJobEmail, sendReminderEmail } = require("../lib/emailer");
 
-// Keywords yang relevan dengan CV Wajjah — otomatis scrape ini
-const AUTO_KEYWORDS = [
-  "fullstack developer",
-  "backend developer",
-  "nodejs developer",
-  "react developer",
-  "php developer",
-  "web developer",
-];
+const AUTO_KEYWORDS = ["developer", "fullstack", "backend", "nodejs"];
+const NOTIFY_MIN_SCORE = 50;
 
-// Seen URLs in-memory (Vercel stateless — pakai simple dedup by this run)
-// Email dedup dilakukan via content, bukan persistent state
-const SCORE_THRESHOLD = 50;
+let dbReady = false;
 
 module.exports = async (req, res) => {
   if (req.method !== "POST" && req.method !== "GET") {
     return res.status(405).json({ error: "Method tidak diizinkan" });
   }
 
-  // Validasi cron secret
   const cronSecret = process.env.CRON_SECRET;
-  const incomingSecret = req.headers["x-cron-secret"] || req.query?.secret;
-  if (cronSecret && incomingSecret !== cronSecret) {
+  const incoming   = req.headers["x-cron-secret"] || req.query?.secret;
+  if (cronSecret && incoming !== cronSecret) {
     return res.status(401).json({ error: "Unauthorized — invalid cron secret." });
   }
 
   const runAt = new Date().toISOString();
-  console.log(`[cron] run started at ${runAt}`);
 
+  // ── Respond langsung supaya cron-job.org tidak timeout (30 detik) ──────
+  res.status(200).json({ ok: true, runAt, message: "Cron started." });
+
+  // ── Lanjut di background ───────────────────────────────────────────────
+  runBackground(runAt).catch((err) => console.error("[cron] background error:", err));
+};
+
+async function runBackground(runAt) {
+  console.log(`[cron] background started ${runAt}`);
+
+  // Init DB
+  if (!dbReady) {
+    await migrate();
+    dbReady = true;
+  }
+
+  // 1. SCRAPE — semua sumber paralel, rotasi keyword
+  const allJobs = [];
+  const scraped = await Promise.allSettled(
+    CRON_SOURCES.map((src, i) => {
+      const kw = AUTO_KEYWORDS[i % AUTO_KEYWORDS.length];
+      return src.searchJobs({ keyword: kw, location: "", maxResults: 8 });
+    })
+  );
+
+  scraped.forEach((r, i) => {
+    const src = CRON_SOURCES[i];
+    if (r.status === "fulfilled") {
+      allJobs.push(...r.value.map((j) => ({ ...j, source: src.id, sourceLabel: src.label })));
+    } else {
+      console.warn(`[cron] ${src.id} gagal:`, r.reason?.message);
+    }
+  });
+
+  // Dedup by URL
+  const unique = Array.from(
+    new Map(allJobs.filter((j) => j.url).map((j) => [j.url, j])).values()
+  );
+  console.log(`[cron] scraped ${unique.length} unique jobs`);
+
+  if (unique.length === 0) {
+    console.log("[cron] tidak ada jobs, skip.");
+    return;
+  }
+
+  // 2. AI MATCH — batch paralel
+  let scored = [];
   try {
-    // 1. Scrape semua sumber dengan berbagai keyword
-    const allJobs = [];
-    const errors = [];
+    scored = await matchJobs({ cvText: CV_TEXT, jobs: unique.slice(0, 20) });
+  } catch (err) {
+    console.error("[cron] AI match gagal:", err.message);
+    // Lanjut tanpa score — simpan dengan score 0
+    scored = unique.map((j) => ({ ...j, matchScore: 0 }));
+  }
 
-    for (const kw of AUTO_KEYWORDS) {
-      const results = await Promise.allSettled(
-        CRON_SOURCES.map((src) =>
-          src.searchJobs({ keyword: kw, location: "", maxResults: 10 })
-        )
-      );
-
-      results.forEach((r, i) => {
-        const src = CRON_SOURCES[i];
-        if (r.status === "fulfilled") {
-          allJobs.push(...r.value.map((j) => ({ ...j, source: src.id, sourceLabel: src.label })));
-        } else {
-          errors.push({ source: src.id, keyword: kw, message: r.reason?.message });
-        }
-      });
+  // 3. UPSERT ke DB
+  for (const job of scored) {
+    try { await upsertJob(job); } catch (err) {
+      console.warn(`[cron] upsert gagal (${job.url}):`, err.message);
     }
+  }
 
-    // Deduplikasi by URL
-    const uniqueJobs = Array.from(new Map(allJobs.filter((j) => j.url).map((j) => [j.url, j])).values());
-    console.log(`[cron] scraped ${uniqueJobs.length} unique jobs, ${errors.length} errors`);
+  // 4. EMAIL — kirim job baru (belum pernah dikirim, score >= 50)
+  const toNotify = await getUnnotified(NOTIFY_MIN_SCORE);
+  console.log(`[cron] ${toNotify.length} jobs to notify`);
 
-    if (uniqueJobs.length === 0) {
-      return res.status(200).json({
-        ok: true,
-        runAt,
-        totalScraped: 0,
-        matched: 0,
-        emailSent: false,
-        errors,
-        message: "Tidak ada lowongan berhasil di-scrape.",
-      });
-    }
-
-    // 2. Match dengan CV Wajjah (batasi max 30 job untuk hemat API call)
-    const jobsToMatch = uniqueJobs.slice(0, 30);
-    const scored = await matchJobs({ cvText: CV_TEXT, jobs: jobsToMatch });
-
-    // 3. Filter yang relevant
-    const goodJobs = scored
-      .filter((j) => j.matchScore >= SCORE_THRESHOLD)
-      .sort((a, b) => b.matchScore - a.matchScore);
-
-    console.log(`[cron] ${goodJobs.length} jobs with score >= ${SCORE_THRESHOLD}`);
-
-    // 4. Kirim email kalau ada
-    let emailResult = { skipped: true };
-    if (goodJobs.length > 0) {
-      emailResult = await sendJobEmail(goodJobs, {
-        totalScraped: uniqueJobs.length,
+  if (toNotify.length > 0) {
+    try {
+      await sendJobEmail(toNotify.map(parseForEmail), {
+        totalScraped: unique.length,
         sources: CRON_SOURCES.map((s) => s.label),
         runAt,
       });
+      await markNotified(toNotify.map((j) => j.url));
+      console.log("[cron] notification email sent");
+    } catch (err) {
+      console.error("[cron] email gagal:", err.message);
     }
-
-    return res.status(200).json({
-      ok: true,
-      runAt,
-      totalScraped: uniqueJobs.length,
-      matched: goodJobs.length,
-      emailSent: emailResult.sent || false,
-      emailSkipped: emailResult.skipped || false,
-      errors: errors.length > 0 ? errors : undefined,
-      topJobs: goodJobs.slice(0, 5).map((j) => ({
-        title: j.title,
-        company: j.company,
-        score: j.matchScore,
-        chanceLabel: j.chanceLabel,
-        url: j.url,
-      })),
-    });
-  } catch (err) {
-    console.error("[cron] fatal error:", err);
-    return res.status(500).json({ ok: false, error: err.message, runAt });
   }
-};
+
+  // 5. REMINDER — job score >= 80, masih pending, sudah > 3 hari
+  const reminders = await getReminderCandidates();
+  console.log(`[cron] ${reminders.length} reminder candidates`);
+
+  if (reminders.length > 0) {
+    try {
+      await sendReminderEmail(reminders.map(parseForEmail), { runAt });
+      await markReminderSent(reminders.map((j) => j.url));
+      console.log("[cron] reminder email sent");
+    } catch (err) {
+      console.error("[cron] reminder email gagal:", err.message);
+    }
+  }
+
+  console.log("[cron] background selesai");
+}
+
+function parseForEmail(j) {
+  const tryParse = (v) => { try { return JSON.parse(v); } catch { return []; } };
+  return {
+    ...j,
+    matchScore:    Number(j.match_score) || 0,
+    chanceLabel:   j.chance_label,
+    recommendation: j.recommendation,
+    techStackMatch: {
+      matched:  tryParse(j.tech_matched),
+      canLearn: tryParse(j.tech_learn),
+      missing:  tryParse(j.tech_missing),
+    },
+    strengths: tryParse(j.strengths),
+    gaps:      tryParse(j.gaps),
+  };
+}

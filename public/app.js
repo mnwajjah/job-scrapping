@@ -385,3 +385,170 @@ function updateStats() {
 function updateEmptyState() {
   el.emptyState.classList.toggle("hidden", state.jobs.length > 0);
 }
+// ═══════════════════════════════════════════════════════════════════════════
+// TRACKER TAB
+// ═══════════════════════════════════════════════════════════════════════════
+
+const trackerState = { status: "all", jobs: [] };
+
+const STATUS_LABELS = {
+  pending: "⏳ Pending", applied: "📤 Applied", interview: "💬 Interview",
+  offered: "🎉 Offered", rejected: "❌ Rejected", skipped: "🚫 Skip",
+};
+const STATUS_NEXT = {
+  pending:   ["applied", "skipped"],
+  applied:   ["interview", "rejected"],
+  interview: ["offered", "rejected"],
+  offered:   [],
+  rejected:  [],
+  skipped:   ["pending"],
+};
+
+// ── Tab switching ──────────────────────────────────────────────────────────
+document.querySelectorAll(".tab-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    const tab = btn.dataset.tab;
+    document.getElementById("tabScrape").classList.toggle("hidden", tab !== "scrape");
+    document.getElementById("tabTracker").classList.toggle("hidden", tab !== "tracker");
+    if (tab === "tracker") loadTracker();
+  });
+});
+
+// ── Tracker filter ─────────────────────────────────────────────────────────
+document.querySelectorAll(".tracker-filter").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tracker-filter").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    trackerState.status = btn.dataset.status;
+    loadTracker();
+  });
+});
+
+// ── Load tracker data ──────────────────────────────────────────────────────
+async function loadTracker() {
+  const trackerStatusBar = document.getElementById("trackerStatusBar");
+  const trackerStatusText = document.getElementById("trackerStatusText");
+  const trackerEmpty = document.getElementById("trackerEmpty");
+  const trackerList = document.getElementById("trackerList");
+  const trackerStats = document.getElementById("trackerStats");
+
+  trackerStatusBar.classList.remove("hidden");
+  trackerStatusText.textContent = "Memuat data…";
+  trackerList.innerHTML = "";
+  trackerEmpty.classList.add("hidden");
+
+  try {
+    // Load stats
+    const statsRes = await fetch("/api/jobs?stats=1", { headers: authHeaders() });
+    if (statsRes.status === 401) { clearToken(); showLogin(); return; }
+    const statsData = await safeJson(statsRes);
+
+    if (statsData.stats) {
+      const s = statsData.stats;
+      trackerStats.innerHTML = `
+        <div class="tracker-stat-card"><span class="tracker-stat-num">${s.total||0}</span><span class="tracker-stat-lbl">Total</span></div>
+        <div class="tracker-stat-card"><span class="tracker-stat-num green">${s.high||0}</span><span class="tracker-stat-lbl">Skor ≥80%</span></div>
+        <div class="tracker-stat-card"><span class="tracker-stat-num yellow">${s.action_needed||0}</span><span class="tracker-stat-lbl">Perlu tindak</span></div>
+        <div class="tracker-stat-card"><span class="tracker-stat-num blue">${s.applied||0}</span><span class="tracker-stat-lbl">Applied</span></div>
+        <div class="tracker-stat-card"><span class="tracker-stat-num purple">${s.interview||0}</span><span class="tracker-stat-lbl">Interview</span></div>
+        <div class="tracker-stat-card"><span class="tracker-stat-num green">${s.offered||0}</span><span class="tracker-stat-lbl">Offered 🎉</span></div>
+      `;
+    }
+
+    // Load jobs
+    const jobsRes = await fetch(`/api/jobs?status=${trackerState.status}&minScore=0&limit=50`, { headers: authHeaders() });
+    const jobsData = await safeJson(jobsRes);
+    trackerState.jobs = jobsData.jobs || [];
+
+    if (trackerState.jobs.length === 0) {
+      trackerEmpty.classList.remove("hidden");
+    } else {
+      trackerState.jobs.forEach((job) => {
+        trackerList.appendChild(buildTrackerCard(job));
+      });
+    }
+  } catch (err) {
+    trackerStatusText.textContent = "Error: " + err.message;
+  } finally {
+    trackerStatusBar.classList.add("hidden");
+  }
+}
+
+// ── Build tracker card ─────────────────────────────────────────────────────
+function buildTrackerCard(job) {
+  const card = document.createElement("div");
+  card.className = "job-card";
+  card.dataset.url = job.url;
+
+  const sc = Number(job.matchScore || job.match_score) || 0;
+  const scoreColor = sc >= 70 ? "var(--green)" : sc >= 50 ? "var(--yellow)" : "var(--red)";
+  const status = job.status || "pending";
+  const badgeClass = `badge-${status}`;
+
+  const matched  = (job.techStackMatch?.matched  || []).map((t) => `<span class="tech-tag match">✓ ${esc(t)}</span>`).join("");
+  const canLearn = (job.techStackMatch?.canLearn || []).map((t) => `<span class="tech-tag learn">📚 ${esc(t)}</span>`).join("");
+  const missing  = (job.techStackMatch?.missing  || []).map((t) => `<span class="tech-tag missing">✗ ${esc(t)}</span>`).join("");
+
+  // Build status action buttons
+  const allStatuses = ["pending","applied","interview","offered","rejected","skipped"];
+  const actionBtns = allStatuses.map((s) => {
+    const isActive = status === s ? ` active-${s}` : "";
+    return `<button class="status-btn${isActive}" data-status="${s}" data-url="${esc(job.url)}">${STATUS_LABELS[s]}</button>`;
+  }).join("");
+
+  card.innerHTML = `
+    <div class="job-card-top">
+      <div class="job-main">
+        <div class="job-title">
+          <a href="${esc(job.url)}" target="_blank" rel="noopener">${esc(job.title)}</a>
+          <span class="app-status-badge ${badgeClass}">${STATUS_LABELS[status]}</span>
+        </div>
+        <div class="job-meta">
+          <span>${esc(job.company||"")}</span>
+          ${job.location ? `<span class="meta-sep">·</span><span>${esc(job.location)}</span>` : ""}
+          ${job.salary   ? `<span class="meta-sep">·</span><span class="salary">💰 ${esc(job.salary)}</span>` : ""}
+          ${job.source_label||job.sourceLabel ? `<span class="meta-sep">·</span><span class="source-badge">${esc(job.source_label||job.sourceLabel)}</span>` : ""}
+        </div>
+      </div>
+      <div class="job-score-wrap">
+        ${sc > 0 ? `<div class="score-ring" style="--score-color:${scoreColor}">
+          <span class="score-pct">${sc}%</span>
+          <span class="score-lbl">${esc(job.chanceLabel||job.chance_label||"")}</span>
+        </div>` : `<div class="score-ring" style="--score-color:var(--text-muted)">
+          <span class="score-pct" style="font-size:10px">N/A</span>
+        </div>`}
+      </div>
+    </div>
+    ${matched||canLearn||missing ? `<div class="tech-tags" style="margin-top:8px">${matched}${canLearn}${missing}</div>` : ""}
+    ${job.reasoning||job.recommendation ? `<p style="font-size:12px;color:var(--text-muted);margin-top:6px">${esc(job.reasoning||"")} ${job.recommendation ? `<strong style="color:${scoreColor}">${esc(job.recommendation)}</strong>` : ""}</p>` : ""}
+    <div class="status-actions">${actionBtns}</div>
+  `;
+
+  // Status button click handler
+  card.querySelectorAll(".status-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const newStatus = btn.dataset.status;
+      const jobUrl = btn.dataset.url;
+      try {
+        const res = await fetch("/api/jobs", {
+          method: "PATCH",
+          headers: authHeaders(),
+          body: JSON.stringify({ url: jobUrl, status: newStatus }),
+        });
+        if (res.ok) {
+          // Update UI immediately
+          card.querySelectorAll(".status-btn").forEach((b) => {
+            b.className = "status-btn";
+            if (b.dataset.status === newStatus) b.classList.add(`active-${newStatus}`);
+          });
+          card.querySelector(".app-status-badge").className = `app-status-badge badge-${newStatus}`;
+          card.querySelector(".app-status-badge").textContent = STATUS_LABELS[newStatus];
+        }
+      } catch (err) { console.error("Status update gagal:", err); }
+    });
+  });
+
+  return card;
+}
