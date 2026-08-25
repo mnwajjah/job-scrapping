@@ -26,6 +26,12 @@ module.exports = async (req, res) => {
         ok: true,
         message: "Koneksi database aktif.",
         jobCount: Number(row?.count) || 0,
+        config: {
+          dbUrl: process.env.TURSO_DATABASE_URL || "not_set",
+          dbTokenMasked: process.env.TURSO_AUTH_TOKEN
+            ? process.env.TURSO_AUTH_TOKEN.slice(0, 10) + "..."
+            : "not_set",
+        }
       });
     }
 
