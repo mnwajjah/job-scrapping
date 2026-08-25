@@ -49,50 +49,55 @@ module.exports = async (req, res) => {
   if (!checkSecret(req))
     return res.status(401).json({ error: "Unauthorized — invalid cron secret." });
 
-  if (!dbReady) {
-    try { await migrate(); dbReady = true; }
-    catch (err) { return res.status(500).json({ error: "DB error: " + err.message }); }
-  }
-
-  const runAt = new Date().toISOString();
-  const result = { runAt, step: "notify", notifications: 0, reminders: 0, emailsSent: 0 };
-
-  // 1. Notifikasi job baru
-  const toNotify = await getUnnotified(NOTIFY_MIN_SCORE);
-  result.notifications = toNotify.length;
-  console.log(`[notify] ${toNotify.length} jobs to notify`);
-
-  if (toNotify.length > 0) {
-    try {
-      const sources = [...new Set(toNotify.map((j) => j.source_label || j.source))];
-      await sendJobEmail(toNotify.map(parseForEmail), {
-        totalScraped: toNotify.length,
-        sources,
-        runAt,
-      });
-      await markNotified(toNotify.map((j) => j.url));
-      result.emailsSent++;
-      console.log("[notify] notification email sent");
-    } catch (err) {
-      console.error("[notify] gagal kirim email:", err.message);
+  try {
+    if (!dbReady) {
+      await migrate();
+      dbReady = true;
     }
-  }
 
-  // 2. Reminder untuk job score >= 80 belum dilamar
-  const reminders = await getReminderCandidates();
-  result.reminders = reminders.length;
-  console.log(`[notify] ${reminders.length} reminder candidates`);
+    const runAt = new Date().toISOString();
+    const result = { runAt, step: "notify", notifications: 0, reminders: 0, emailsSent: 0 };
 
-  if (reminders.length > 0) {
-    try {
-      await sendReminderEmail(reminders.map(parseForEmail), { runAt });
-      await markReminderSent(reminders.map((j) => j.url));
-      result.emailsSent++;
-      console.log("[notify] reminder email sent");
-    } catch (err) {
-      console.error("[notify] gagal kirim reminder:", err.message);
+    // 1. Notifikasi job baru
+    const toNotify = await getUnnotified(NOTIFY_MIN_SCORE);
+    result.notifications = toNotify.length;
+    console.log(`[notify] ${toNotify.length} jobs to notify`);
+
+    if (toNotify.length > 0) {
+      try {
+        const sources = [...new Set(toNotify.map((j) => j.source_label || j.source))];
+        await sendJobEmail(toNotify.map(parseForEmail), {
+          totalScraped: toNotify.length,
+          sources,
+          runAt,
+        });
+        await markNotified(toNotify.map((j) => j.url));
+        result.emailsSent++;
+        console.log("[notify] notification email sent");
+      } catch (err) {
+        console.error("[notify] gagal kirim email:", err.message);
+      }
     }
-  }
 
-  return res.status(200).json({ ok: true, ...result });
+    // 2. Reminder untuk job score >= 80 belum dilamar
+    const reminders = await getReminderCandidates();
+    result.reminders = reminders.length;
+    console.log(`[notify] ${reminders.length} reminder candidates`);
+
+    if (reminders.length > 0) {
+      try {
+        await sendReminderEmail(reminders.map(parseForEmail), { runAt });
+        await markReminderSent(reminders.map((j) => j.url));
+        result.emailsSent++;
+        console.log("[notify] reminder email sent");
+      } catch (err) {
+        console.error("[notify] gagal kirim reminder:", err.message);
+      }
+    }
+
+    return res.status(200).json({ ok: true, ...result });
+  } catch (err) {
+    console.error("[notify] Fatal error:", err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
 };
