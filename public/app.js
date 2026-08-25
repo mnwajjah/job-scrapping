@@ -1,51 +1,75 @@
 /**
- * Cocok v2 — Frontend App
- * Auth flow → Dashboard dengan scrape + AI match otomatis dari CV Wajjah
+ * Cocok v3 — Unified Frontend Dashboard Script
+ * - Default: Memuat lowongan dari Turso DB
+ * - Tracker status lamaran yang tersinkronisasi
+ * - Filter status, score, dan text search instan (offline)
+ * - Pemicu scrape manual langsung memperbarui DB & UI
  */
 
 const TOKEN_KEY = "cocok_token";
 
 // ── State ──────────────────────────────────────────────────────────────────
 const state = {
-  jobs: [],
-  filter: "all",
+  jobs: [],            // List lowongan dari DB
+  statusFilter: "all", // "all", "pending", "applied", etc.
+  scoreFilter: "all",  // "all", "high", "mid", "low", "unscored"
+  searchQuery: "",     // Filter teks pencarian
+};
+
+const STATUS_LABELS = {
+  pending: "⏳ Pending",
+  applied: "📤 Applied",
+  interview: "💬 Interview",
+  offered: "🎉 Offered",
+  rejected: "❌ Rejected",
+  skipped: "🚫 Skip",
 };
 
 // ── DOM Refs ───────────────────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
 
 const el = {
-  loginPage:    $("loginPage"),
-  dashPage:     $("dashPage"),
-  loginForm:    $("loginForm"),
-  passwordInput:$("passwordInput"),
-  loginError:   $("loginError"),
-  btnLogin:     $("btnLogin"),
-  btnLogout:    $("btnLogout"),
-  keyword:      $("keyword"),
-  location:     $("location"),
-  sourceList:   $("sourceList"),
-  btnScrape:    $("btnScrape"),
-  btnMatch:     $("btnMatch"),
-  statusBar:    $("statusBar"),
-  statusText:   $("statusText"),
-  errorBox:     $("errorBox"),
-  statsRow:     $("statsRow"),
-  statTotal:    $("statTotal"),
-  statMatched:  $("statMatched"),
-  statGood:     $("statGood"),
-  filterRow:    $("filterRow"),
-  jobList:      $("jobList"),
-  emptyState:   $("emptyState"),
-  cronStatus:   $("cronStatus"),
-  cronStatusText:$("cronStatusText"),
+  loginPage:       $("loginPage"),
+  dashPage:        $("dashPage"),
+  loginForm:       $("loginForm"),
+  passwordInput:   $("passwordInput"),
+  loginError:      $("loginError"),
+  btnLogin:        $("btnLogin"),
+  btnLogout:       $("btnLogout"),
+  
+  // Scraper sidebar refs
+  keyword:         $("keyword"),
+  location:        $("location"),
+  sourceList:      $("sourceList"),
+  btnScrape:       $("btnScrape"),
+  btnMatch:        $("btnMatch"),
+  statusBar:       $("statusBar"),
+  statusText:      $("statusText"),
+  errorBox:        $("errorBox"),
+
+  // Tracker main content refs
+  statTotal:        $("statTotal"),
+  statHigh:         $("statHigh"),
+  statActionNeeded: $("statActionNeeded"),
+  statApplied:      $("statApplied"),
+  statInterview:    $("statInterview"),
+  
+  scoreFilter:      $("scoreFilter"),
+  searchInput:      $("searchInput"),
+  trackerStatusBar: $("trackerStatusBar"),
+  trackerStatusText:$("trackerStatusText"),
+  trackerList:      $("trackerList"),
+  trackerEmpty:     $("trackerEmpty"),
+  cronStatus:       $("cronStatus"),
+  cronStatusText:   $("cronStatusText"),
 };
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// ── Auth Helpers ───────────────────────────────────────────────────────────
 function getToken() { return localStorage.getItem(TOKEN_KEY); }
 function setToken(t) { localStorage.setItem(TOKEN_KEY, t); }
 function clearToken() { localStorage.removeItem(TOKEN_KEY); }
 
+// Perbaiki header auth agar konsisten
 function authHeaders() {
   return { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` };
 }
@@ -55,21 +79,17 @@ function esc(str) {
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-/**
- * Parse response sebagai JSON, dengan fallback ke text kalau bukan JSON.
- * Mencegah crash "Unexpected token 'A'" saat Vercel return HTML error page.
- */
 async function safeJson(res) {
   const text = await res.text();
   try {
     return JSON.parse(text);
   } catch {
-    // Server tidak return JSON — kemungkinan timeout/crash
     const preview = text.slice(0, 150).replace(/<[^>]+>/g, " ").trim();
     throw new Error(`Server error: ${preview}`);
   }
 }
 
+// ── Status Messages (Sidebar Scraper) ──────────────────────────────────────
 function showStatus(text) {
   el.statusText.textContent = text;
   el.statusBar.classList.remove("hidden");
@@ -82,7 +102,7 @@ function showError(msg) {
 }
 function clearError() { el.errorBox.classList.add("hidden"); }
 
-// ── Auth ───────────────────────────────────────────────────────────────────
+// ── Auth Flow ──────────────────────────────────────────────────────────────
 function showLogin() {
   el.loginPage.classList.remove("hidden");
   el.dashPage.classList.add("hidden");
@@ -102,7 +122,7 @@ if (getToken()) {
   showLogin();
 }
 
-// Login form submit
+// Login
 el.loginForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const pw = el.passwordInput.value.trim();
@@ -141,10 +161,10 @@ el.btnLogout.addEventListener("click", () => {
 // ── Dashboard Init ─────────────────────────────────────────────────────────
 function initDash() {
   loadSources();
-  updateEmptyState();
+  loadTracker();
 }
 
-// Load sumber lowongan
+// Load scraper sources checkbox
 async function loadSources() {
   try {
     const res = await fetch("/api/sources", { headers: authHeaders() });
@@ -156,7 +176,7 @@ async function loadSources() {
 
 function renderSourceChips(sources) {
   el.sourceList.innerHTML = "";
-  sources.forEach((src, i) => {
+  sources.forEach((src) => {
     const wrap = document.createElement("div");
     wrap.className = "chip" + (src.usePuppeteer ? " chip-puppet" : "");
 
@@ -164,8 +184,7 @@ function renderSourceChips(sources) {
     cb.type = "checkbox";
     cb.id = `src_${src.id}`;
     cb.value = src.id;
-    // Default checked: semua non-puppeteer + glints
-    cb.checked = !src.usePuppeteer;
+    cb.checked = !src.usePuppeteer; // Default checked yang aman (non-puppeteer)
 
     const lbl = document.createElement("label");
     lbl.htmlFor = `src_${src.id}`;
@@ -182,265 +201,14 @@ function selectedSources() {
   return Array.from(el.sourceList.querySelectorAll("input[type=checkbox]:checked")).map((cb) => cb.value);
 }
 
-// ── Shared match function (dipanggil otomatis setelah scrape) ──────────────
-async function runMatch() {
-  if (state.jobs.length === 0) return;
-  el.btnMatch.disabled = true;
-  showStatus(`Menganalisis ${state.jobs.length} lowongan dengan AI… (bisa 1-2 menit)`);
-
-  try {
-    const res = await fetch("/api/match", {
-      method: "POST",
-      headers: authHeaders(),
-      body: JSON.stringify({ jobs: state.jobs }),
-    });
-    if (res.status === 401) { clearToken(); showLogin(); return; }
-    const data = await safeJson(res);
-    if (!res.ok) throw new Error(data.error || "Gagal analisis.");
-
-    state.jobs = data.jobs;
-    renderJobs();
-    updateStats();
-  } catch (err) {
-    showError("Analisis CV gagal: " + err.message);
-  } finally {
-    el.btnMatch.disabled = false;
-    hideStatus();
-  }
-}
-
-// ── Scraping (otomatis lanjut ke match) ────────────────────────────────────
-el.btnScrape.addEventListener("click", async () => {
-  clearError();
-  const sources = selectedSources();
-  if (sources.length === 0) { showError("Pilih minimal satu sumber."); return; }
-
-  const keyword = el.keyword.value.trim();
-  const isAuto = !keyword;
-
-  el.btnScrape.disabled = true;
-  showStatus(isAuto
-    ? `Scraping otomatis dari CV di ${sources.length} sumber…`
-    : `Scraping "${keyword}" di ${sources.length} sumber…`);
-
-  try {
-    const res = await fetch("/api/search", {
-      method: "POST",
-      headers: authHeaders(),
-      body: JSON.stringify({ keyword, location: el.location.value.trim(), sources }),
-    });
-    if (res.status === 401) { clearToken(); showLogin(); return; }
-    const data = await safeJson(res);
-    if (!res.ok) throw new Error(data.error || "Gagal scraping.");
-
-    state.jobs = data.jobs.map((j) => ({ ...j, matchScore: null }));
-    renderJobs();
-    updateStats();
-
-    // Tampilkan warning sumber gagal tapi jangan blokir flow
-    if (data.errors?.length) {
-      showError(`Sebagian sumber gagal: ${data.errors.map((e) => `${e.label} (${e.message})`).join("; ")}`);
-    }
-
-    // Langsung jalankan AI matching otomatis
-    await runMatch();
-
-  } catch (err) {
-    showError(err.message);
-    el.btnScrape.disabled = false;
-    hideStatus();
-    return;
-  }
-
-  el.btnScrape.disabled = false;
-});
-
-// ── Tombol Match manual (tetap ada untuk re-analisis) ─────────────────────
-el.btnMatch.addEventListener("click", () => runMatch());
-
-
-// ── Filter ─────────────────────────────────────────────────────────────────
-document.addEventListener("click", (e) => {
-  const btn = e.target.closest(".filter-btn");
-  if (!btn) return;
-  document.querySelectorAll(".filter-btn").forEach((b) => b.classList.remove("active"));
-  btn.classList.add("active");
-  state.filter = btn.dataset.filter;
-  renderJobs();
-});
-
-function filteredJobs() {
-  switch (state.filter) {
-    case "high":     return state.jobs.filter((j) => j.matchScore !== null && j.matchScore >= 70);
-    case "mid":      return state.jobs.filter((j) => j.matchScore !== null && j.matchScore >= 50 && j.matchScore < 70);
-    case "low":      return state.jobs.filter((j) => j.matchScore !== null && j.matchScore < 50);
-    case "unscored": return state.jobs.filter((j) => j.matchScore === null);
-    default:         return state.jobs;
-  }
-}
-
-// ── Render Jobs ────────────────────────────────────────────────────────────
-function renderJobs() {
-  el.jobList.innerHTML = "";
-  el.btnMatch.classList.toggle("hidden", state.jobs.length === 0);
-  el.filterRow.classList.toggle("hidden", state.jobs.length === 0);
-  el.statsRow.classList.toggle("hidden", state.jobs.length === 0);
-  updateEmptyState();
-
-  const visible = filteredJobs();
-  visible.forEach((job, idx) => {
-    el.jobList.appendChild(buildJobCard(job, idx));
-  });
-}
-
-function buildJobCard(job, idx) {
-  const card = document.createElement("div");
-  const hasScore = job.matchScore !== null;
-
-  let scoreClass = "none";
-  if (hasScore) {
-    if (job.matchScore >= 70) scoreClass = "high";
-    else if (job.matchScore >= 50) scoreClass = "mid";
-    else scoreClass = "low";
-  }
-
-  card.className = `job-card${hasScore ? ` scored-${scoreClass}` : ""}`;
-  card.dataset.idx = idx;
-
-  const titleHtml = job.url
-    ? `<a href="${esc(job.url)}" target="_blank" rel="noopener">${esc(job.title)}</a>`
-    : esc(job.title);
-
-  const meta = [job.company, job.location, job.salary].filter(Boolean).map(esc).join(" · ");
-
-  // Score circle
-  const scoreHtml = `
-    <div class="score-pill">
-      <div class="score-circle ${scoreClass}">
-        ${hasScore ? job.matchScore + "%" : "—"}
-      </div>
-      ${hasScore ? `<div class="score-label">${esc(job.chanceLabel || "")}</div>` : ""}
-    </div>`;
-
-  // Tech tags
-  let detailsHtml = "";
-  if (hasScore && job.techStackMatch) {
-    const matched = (job.techStackMatch.matched || []).map((t) => `<span class="tech-tag match">✓ ${esc(t)}</span>`).join("");
-    const learn = (job.techStackMatch.canLearn || []).map((t) => `<span class="tech-tag learn">📚 ${esc(t)}</span>`).join("");
-    const missing = (job.techStackMatch.missing || []).map((t) => `<span class="tech-tag missing">✗ ${esc(t)}</span>`).join("");
-
-    const recClass = job.matchScore >= 70 ? "rec-apply" : job.matchScore >= 50 ? "rec-consider" : "rec-skip";
-
-    detailsHtml = `
-      <div class="job-details">
-        <div class="detail-row">
-          <div class="detail-block">
-            <div class="detail-title">Tech Stack</div>
-            <div class="tech-tags">${matched}${learn}${missing}</div>
-          </div>
-          <div class="detail-block">
-            <div class="detail-title">Analisis</div>
-            <p class="reasoning-text">${esc(job.reasoning || "")}</p>
-            ${job.recommendation ? `<span class="recommendation-badge ${recClass}">${esc(job.recommendation)}</span>` : ""}
-          </div>
-        </div>
-      </div>`;
-  }
-
-  card.innerHTML = `
-    <div class="job-card-top">
-      <div class="job-main">
-        <div class="job-title">
-          ${titleHtml}
-          <span class="source-tag">${esc(job.sourceLabel || "")}</span>
-        </div>
-        ${meta ? `<div class="job-meta">${meta}</div>` : ""}
-        ${hasScore ? `<button class="toggle-details">Detail ▾</button>` : ""}
-      </div>
-      ${scoreHtml}
-    </div>
-    ${detailsHtml}`;
-
-  // Toggle detail
-  const toggleBtn = card.querySelector(".toggle-details");
-  if (toggleBtn) {
-    toggleBtn.addEventListener("click", () => {
-      card.classList.toggle("expanded");
-      toggleBtn.textContent = card.classList.contains("expanded") ? "Tutup ▴" : "Detail ▾";
-    });
-  }
-
-  return card;
-}
-
-// ── Stats Update ───────────────────────────────────────────────────────────
-function updateStats() {
-  const scored = state.jobs.filter((j) => j.matchScore !== null);
-  const good = scored.filter((j) => j.matchScore >= 70);
-  el.statTotal.textContent = state.jobs.length;
-  el.statMatched.textContent = scored.length;
-  el.statGood.textContent = good.length;
-}
-
-function updateEmptyState() {
-  el.emptyState.classList.toggle("hidden", state.jobs.length > 0);
-}
-// ═══════════════════════════════════════════════════════════════════════════
-// TRACKER TAB
-// ═══════════════════════════════════════════════════════════════════════════
-
-const trackerState = { status: "all", jobs: [] };
-
-const STATUS_LABELS = {
-  pending: "⏳ Pending", applied: "📤 Applied", interview: "💬 Interview",
-  offered: "🎉 Offered", rejected: "❌ Rejected", skipped: "🚫 Skip",
-};
-const STATUS_NEXT = {
-  pending:   ["applied", "skipped"],
-  applied:   ["interview", "rejected"],
-  interview: ["offered", "rejected"],
-  offered:   [],
-  rejected:  [],
-  skipped:   ["pending"],
-};
-
-// ── Tab switching ──────────────────────────────────────────────────────────
-document.querySelectorAll(".tab-btn").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
-    const tab = btn.dataset.tab;
-    document.getElementById("tabScrape").classList.toggle("hidden", tab !== "scrape");
-    document.getElementById("tabTracker").classList.toggle("hidden", tab !== "tracker");
-    if (tab === "tracker") loadTracker();
-  });
-});
-
-// ── Tracker filter ─────────────────────────────────────────────────────────
-document.querySelectorAll(".tracker-filter").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".tracker-filter").forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
-    trackerState.status = btn.dataset.status;
-    loadTracker();
-  });
-});
-
-// ── Load tracker data ──────────────────────────────────────────────────────
+// ── Load Tracker Data (All Jobs dari DB) ──────────────────────────────────
 async function loadTracker() {
-  const trackerStatusBar = document.getElementById("trackerStatusBar");
-  const trackerStatusText = document.getElementById("trackerStatusText");
-  const trackerEmpty = document.getElementById("trackerEmpty");
-  const trackerList = document.getElementById("trackerList");
-  const trackerStats = document.getElementById("trackerStats");
-
-  trackerStatusBar.classList.remove("hidden");
-  trackerStatusText.textContent = "Memuat data…";
-  trackerList.innerHTML = "";
-  trackerEmpty.classList.add("hidden");
+  el.trackerStatusBar.classList.remove("hidden");
+  el.trackerStatusText.textContent = "Memuat data dari database Turso…";
+  el.trackerEmpty.classList.add("hidden");
 
   try {
-    // Load stats
+    // 1. Ambil Statistik real-time
     const statsRes = await fetch("/api/jobs?stats=1", { headers: authHeaders() });
     if (statsRes.status === 401) { clearToken(); showLogin(); return; }
     const statsData = await safeJson(statsRes);
@@ -448,43 +216,72 @@ async function loadTracker() {
 
     if (statsData.stats) {
       const s = statsData.stats;
-      trackerStats.innerHTML = `
-        <div class="tracker-stat-card"><span class="tracker-stat-num">${s.total||0}</span><span class="tracker-stat-lbl">Total</span></div>
-        <div class="tracker-stat-card"><span class="tracker-stat-num green">${s.high||0}</span><span class="tracker-stat-lbl">Skor ≥80%</span></div>
-        <div class="tracker-stat-card"><span class="tracker-stat-num yellow">${s.action_needed||0}</span><span class="tracker-stat-lbl">Perlu tindak</span></div>
-        <div class="tracker-stat-card"><span class="tracker-stat-num blue">${s.applied||0}</span><span class="tracker-stat-lbl">Applied</span></div>
-        <div class="tracker-stat-card"><span class="tracker-stat-num purple">${s.interview||0}</span><span class="tracker-stat-lbl">Interview</span></div>
-        <div class="tracker-stat-card"><span class="tracker-stat-num green">${s.offered||0}</span><span class="tracker-stat-lbl">Offered 🎉</span></div>
-      `;
+      el.statTotal.textContent = s.total || 0;
+      el.statHigh.textContent = s.high || 0;
+      el.statActionNeeded.textContent = s.action_needed || 0;
+      el.statApplied.textContent = s.applied || 0;
+      el.statInterview.textContent = s.interview || 0;
     }
 
-    // Load jobs
-    const jobsRes = await fetch(`/api/jobs?status=${trackerState.status}&minScore=0&limit=50`, { headers: authHeaders() });
+    // 2. Ambil List Jobs (Semua, limit 100)
+    const jobsRes = await fetch("/api/jobs?status=all&minScore=0&limit=100", { headers: authHeaders() });
     const jobsData = await safeJson(jobsRes);
     if (!jobsRes.ok) throw new Error(jobsData.error || "Gagal memuat daftar lowongan.");
-    trackerState.jobs = jobsData.jobs || [];
-
-    if (trackerState.jobs.length === 0) {
-      trackerEmpty.classList.remove("hidden");
-    } else {
-      trackerState.jobs.forEach((job) => {
-        trackerList.appendChild(buildTrackerCard(job));
-      });
-    }
-    trackerStatusBar.classList.add("hidden");
+    
+    state.jobs = jobsData.jobs || [];
+    renderJobs();
+    
+    el.trackerStatusBar.classList.add("hidden");
   } catch (err) {
-    trackerStatusText.textContent = "Error: " + err.message;
-    trackerStatusBar.classList.remove("hidden");
+    el.trackerStatusText.textContent = "Error: " + err.message;
+    el.trackerStatusBar.classList.remove("hidden");
   }
 }
 
-// ── Build tracker card ─────────────────────────────────────────────────────
+// ── Render Jobs List (dengan Filter Frontend Offline) ──────────────────────
+function renderJobs() {
+  el.trackerList.innerHTML = "";
+  
+  // Filter jobs di memori untuk kecepatan instan
+  const filtered = state.jobs.filter((j) => {
+    // Filter Status
+    if (state.statusFilter !== "all" && j.status !== state.statusFilter) return false;
+
+    // Filter Skor AI
+    const sc = Number(j.matchScore) || 0;
+    const hasScore = j.matchScore !== null && j.matchScore !== 0;
+    if (state.scoreFilter === "high" && (!hasScore || sc < 70)) return false;
+    if (state.scoreFilter === "mid" && (!hasScore || sc < 50 || sc >= 70)) return false;
+    if (state.scoreFilter === "low" && (!hasScore || sc >= 50)) return false;
+    if (state.scoreFilter === "unscored" && hasScore) return false;
+
+    // Filter Pencarian Teks
+    if (state.searchQuery) {
+      const q = state.searchQuery.toLowerCase();
+      const title = (j.title || "").toLowerCase();
+      const company = (j.company || "").toLowerCase();
+      const tech = (j.techStackMatch?.matched || []).join(" ").toLowerCase() + " " +
+                   (j.techStackMatch?.canLearn || []).join(" ").toLowerCase();
+      if (!title.includes(q) && !company.includes(q) && !tech.includes(q)) return false;
+    }
+
+    return true;
+  });
+
+  el.trackerEmpty.classList.toggle("hidden", filtered.length > 0);
+
+  filtered.forEach((job) => {
+    el.trackerList.appendChild(buildTrackerCard(job));
+  });
+}
+
+// ── Build Job Card ─────────────────────────────────────────────────────────
 function buildTrackerCard(job) {
   const card = document.createElement("div");
   card.className = "job-card";
   card.dataset.url = job.url;
 
-  const sc = Number(job.matchScore || job.match_score) || 0;
+  const sc = Number(job.matchScore) || 0;
   const scoreColor = sc >= 70 ? "var(--green)" : sc >= 50 ? "var(--yellow)" : "var(--red)";
   const status = job.status || "pending";
   const badgeClass = `badge-${status}`;
@@ -493,9 +290,9 @@ function buildTrackerCard(job) {
   const canLearn = (job.techStackMatch?.canLearn || []).map((t) => `<span class="tech-tag learn">📚 ${esc(t)}</span>`).join("");
   const missing  = (job.techStackMatch?.missing  || []).map((t) => `<span class="tech-tag missing">✗ ${esc(t)}</span>`).join("");
 
-  // Build status action buttons
-  const allStatuses = ["pending","applied","interview","offered","rejected","skipped"];
-  const actionBtns = allStatuses.map((s) => {
+  // Tombol aksi status lamaran
+  const statusKeys = ["pending", "applied", "interview", "offered", "rejected", "skipped"];
+  const actionBtns = statusKeys.map((s) => {
     const isActive = status === s ? ` active-${s}` : "";
     return `<button class="status-btn${isActive}" data-status="${s}" data-url="${esc(job.url)}">${STATUS_LABELS[s]}</button>`;
   }).join("");
@@ -508,27 +305,37 @@ function buildTrackerCard(job) {
           <span class="app-status-badge ${badgeClass}">${STATUS_LABELS[status]}</span>
         </div>
         <div class="job-meta">
-          <span>${esc(job.company||"")}</span>
+          <span>${esc(job.company || "")}</span>
           ${job.location ? `<span class="meta-sep">·</span><span>${esc(job.location)}</span>` : ""}
           ${job.salary   ? `<span class="meta-sep">·</span><span class="salary">💰 ${esc(job.salary)}</span>` : ""}
-          ${job.source_label||job.sourceLabel ? `<span class="meta-sep">·</span><span class="source-badge">${esc(job.source_label||job.sourceLabel)}</span>` : ""}
+          ${job.sourceLabel || job.source_label ? `<span class="meta-sep">·</span><span class="source-badge">${esc(job.sourceLabel || job.source_label)}</span>` : ""}
         </div>
       </div>
       <div class="job-score-wrap">
-        ${sc > 0 ? `<div class="score-ring" style="--score-color:${scoreColor}">
-          <span class="score-pct">${sc}%</span>
-          <span class="score-lbl">${esc(job.chanceLabel||job.chance_label||"")}</span>
-        </div>` : `<div class="score-ring" style="--score-color:var(--text-muted)">
-          <span class="score-pct" style="font-size:10px">N/A</span>
-        </div>`}
+        ${sc > 0 ? `
+          <div class="score-ring" style="--score-color:${scoreColor}">
+            <span class="score-pct">${sc}%</span>
+            <span class="score-lbl">${esc(job.chanceLabel || "")}</span>
+          </div>
+        ` : `
+          <div class="score-ring" style="--score-color:var(--text-muted)">
+            <span class="score-pct" style="font-size:10px">N/A</span>
+            <span class="score-lbl">Belum Analisis</span>
+          </div>
+        `}
       </div>
     </div>
-    ${matched||canLearn||missing ? `<div class="tech-tags" style="margin-top:8px">${matched}${canLearn}${missing}</div>` : ""}
-    ${job.reasoning||job.recommendation ? `<p style="font-size:12px;color:var(--text-muted);margin-top:6px">${esc(job.reasoning||"")} ${job.recommendation ? `<strong style="color:${scoreColor}">${esc(job.recommendation)}</strong>` : ""}</p>` : ""}
+    ${matched || canLearn || missing ? `<div class="tech-tags" style="margin-top:8px">${matched}${canLearn}${missing}</div>` : ""}
+    ${job.reasoning || job.recommendation ? `
+      <p style="font-size:12px;color:var(--text-muted);margin-top:6px">
+        ${esc(job.reasoning || "")} 
+        ${job.recommendation ? `<strong style="color:${scoreColor}">${esc(job.recommendation)}</strong>` : ""}
+      </p>
+    ` : ""}
     <div class="status-actions">${actionBtns}</div>
   `;
 
-  // Status button click handler
+  // Listener tombol ganti status
   card.querySelectorAll(".status-btn").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const newStatus = btn.dataset.status;
@@ -540,13 +347,13 @@ function buildTrackerCard(job) {
           body: JSON.stringify({ url: jobUrl, status: newStatus }),
         });
         if (res.ok) {
-          // Update UI immediately
-          card.querySelectorAll(".status-btn").forEach((b) => {
-            b.className = "status-btn";
-            if (b.dataset.status === newStatus) b.classList.add(`active-${newStatus}`);
-          });
-          card.querySelector(".app-status-badge").className = `app-status-badge badge-${newStatus}`;
-          card.querySelector(".app-status-badge").textContent = STATUS_LABELS[newStatus];
+          // Update status di memory lokal & render ulang agar counter stats update
+          const idx = state.jobs.findIndex((j) => j.url === jobUrl);
+          if (idx !== -1) {
+            state.jobs[idx].status = newStatus;
+          }
+          // Reload stats & UI
+          loadTracker();
         }
       } catch (err) { console.error("Status update gagal:", err); }
     });
@@ -554,3 +361,80 @@ function buildTrackerCard(job) {
 
   return card;
 }
+
+// ── Toolbar Filter Listeners ───────────────────────────────────────────────
+document.querySelectorAll(".tracker-filter").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tracker-filter").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    state.statusFilter = btn.dataset.status;
+    renderJobs();
+  });
+});
+
+el.scoreFilter.addEventListener("change", (e) => {
+  state.scoreFilter = e.target.value;
+  renderJobs();
+});
+
+el.searchInput.addEventListener("input", (e) => {
+  state.searchQuery = e.target.value.trim();
+  renderJobs();
+});
+
+// ── Manual Scrape Flow (Saling terhubung ke database) ─────────────────────
+el.btnScrape.addEventListener("click", async () => {
+  clearError();
+  const sources = selectedSources();
+  if (sources.length === 0) { showError("Pilih minimal satu sumber."); return; }
+
+  const keyword = el.keyword.value.trim();
+  const isAuto = !keyword;
+
+  el.btnScrape.disabled = true;
+  showStatus(isAuto
+    ? `Scraping otomatis di background & menyimpan ke DB Turso…`
+    : `Scraping "${keyword}" & menyimpan ke DB Turso…`);
+
+  try {
+    // 1. Panggil Scrape API (Ini otomatis menyimpan lowongan baru ke DB)
+    const res = await fetch("/api/search", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ keyword, location: el.location.value.trim(), sources }),
+    });
+    if (res.status === 401) { clearToken(); showLogin(); return; }
+    const data = await safeJson(res);
+    if (!res.ok) throw new Error(data.error || "Gagal scraping.");
+
+    // Tampilkan info jika sebagian sumber gagal
+    if (data.errors?.length) {
+      showError(`Sebagian sumber gagal: ${data.errors.map((e) => `${e.label} (${e.message})`).join("; ")}`);
+    }
+
+    // Refresh UI Tracker agar lowongan mentah baru langsung kelihatan
+    await loadTracker();
+
+    // 2. Lakukan Analisis AI (Gemini) manual terhadap lowongan baru tersebut
+    const unscoredJobs = state.jobs.filter((j) => j.matchScore === null || j.matchScore === 0);
+    if (unscoredJobs.length > 0) {
+      showStatus(`Menganalisis ${unscoredJobs.length} lowongan baru dengan Gemini AI…`);
+      const matchRes = await fetch("/api/match", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ jobs: unscoredJobs }),
+      });
+      const matchData = await safeJson(matchRes);
+      if (!matchRes.ok) throw new Error(matchData.error || "Gagal analisis AI.");
+      
+      // Reload ulang Tracker untuk menampilkan data termatch yang tersimpan di DB
+      await loadTracker();
+    }
+
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    el.btnScrape.disabled = false;
+    hideStatus();
+  }
+});
