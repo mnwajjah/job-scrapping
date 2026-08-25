@@ -444,6 +444,7 @@ async function loadTracker() {
     const statsRes = await fetch("/api/jobs?stats=1", { headers: authHeaders() });
     if (statsRes.status === 401) { clearToken(); showLogin(); return; }
     const statsData = await safeJson(statsRes);
+    if (!statsRes.ok) throw new Error(statsData.error || "Gagal memuat statistik.");
 
     if (statsData.stats) {
       const s = statsData.stats;
@@ -460,6 +461,7 @@ async function loadTracker() {
     // Load jobs
     const jobsRes = await fetch(`/api/jobs?status=${trackerState.status}&minScore=0&limit=50`, { headers: authHeaders() });
     const jobsData = await safeJson(jobsRes);
+    if (!jobsRes.ok) throw new Error(jobsData.error || "Gagal memuat daftar lowongan.");
     trackerState.jobs = jobsData.jobs || [];
 
     if (trackerState.jobs.length === 0) {
@@ -469,10 +471,10 @@ async function loadTracker() {
         trackerList.appendChild(buildTrackerCard(job));
       });
     }
+    trackerStatusBar.classList.add("hidden");
   } catch (err) {
     trackerStatusText.textContent = "Error: " + err.message;
-  } finally {
-    trackerStatusBar.classList.add("hidden");
+    trackerStatusBar.classList.remove("hidden");
   }
 }
 
