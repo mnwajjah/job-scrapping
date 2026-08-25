@@ -48,18 +48,18 @@ module.exports = async (req, res) => {
     }
 
     if (action === "insertTest") {
-      // Coba lakukan insert data test
       const testUrl = `https://test-job-${Date.now()}.com`;
       await db.exec(`
         INSERT INTO jobs (url, title, company, source)
         VALUES (?, ?, ?, ?)
       `, [testUrl, "Test Engineer", "Test Company LLC", "test"]);
 
-      const check = await db.first("SELECT * FROM jobs WHERE url = ?", [testUrl]);
+      const allJobs = await db.run("SELECT * FROM jobs");
       return res.status(200).json({
         ok: true,
-        message: "Insert data test sukses!",
-        insertedJob: check,
+        message: "Insert data test selesai.",
+        totalInDb: allJobs.length,
+        jobs: allJobs,
       });
     }
 
