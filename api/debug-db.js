@@ -63,6 +63,43 @@ module.exports = async (req, res) => {
       });
     }
 
+    if (action === "rawQuery") {
+      const sql = req.query.sql || "SELECT name, sql FROM sqlite_master WHERE type='table'";
+      const DB_URL = process.env.TURSO_DATABASE_URL;
+      const DB_AUTH = process.env.TURSO_AUTH_TOKEN;
+      let targetUrl = DB_URL;
+      if (targetUrl && targetUrl.startsWith("libsql://")) {
+        targetUrl = targetUrl.replace("libsql://", "https://");
+      }
+
+      const requests = [
+        {
+          type: "execute",
+          stmt: {
+            sql,
+            args: [],
+          },
+        },
+        { type: "close" },
+      ];
+
+      const resHttp = await fetch(`${targetUrl}/v2/pipeline`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${DB_AUTH}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ requests }),
+      });
+
+      const rawJson = await resHttp.json();
+      return res.status(200).json({
+        ok: true,
+        httpStatus: resHttp.status,
+        rawJson,
+      });
+    }
+
     if (action === "clear") {
       // Hapus semua data (untuk testing)
       await db.exec("DELETE FROM jobs");
