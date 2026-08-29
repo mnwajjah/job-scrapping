@@ -79,6 +79,34 @@ function esc(str) {
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+function formatFriendlyDate(dateStr) {
+  if (!dateStr) return "";
+  // Ubah YYYY-MM-DD HH:MM:SS menjadi standard ISO UTC agar parsed secara UTC
+  const isoStr = dateStr.replace(" ", "T") + "Z";
+  const date = new Date(isoStr);
+  if (isNaN(date.getTime())) return dateStr;
+
+  const now = new Date();
+  const diffMs = now - date;
+  const diffMins = Math.floor(diffMs / (1000 * 60));
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  if (diffMins < 1) {
+    return "Baru saja";
+  } else if (diffMins < 60) {
+    return `${diffMins} menit lalu`;
+  } else if (diffHours < 24) {
+    return `${diffHours} jam lalu`;
+  } else if (diffDays === 1) {
+    return "Kemarin";
+  } else if (diffDays < 7) {
+    return `${diffDays} hari lalu`;
+  } else {
+    return date.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+  }
+}
+
 async function safeJson(res) {
   const text = await res.text();
   try {
@@ -309,6 +337,10 @@ function buildTrackerCard(job) {
           ${job.location ? `<span class="meta-sep">·</span><span>${esc(job.location)}</span>` : ""}
           ${job.salary   ? `<span class="meta-sep">·</span><span class="salary">💰 ${esc(job.salary)}</span>` : ""}
           ${job.sourceLabel || job.source_label ? `<span class="meta-sep">·</span><span class="source-badge">${esc(job.sourceLabel || job.source_label)}</span>` : ""}
+        </div>
+        <div class="job-dates">
+          <span class="date-lbl">🔍 Ditemukan: ${formatFriendlyDate(job.scraped_at)}</span>
+          ${job.status_updated_at ? `<span class="meta-sep">·</span><span class="date-lbl">⚡ Update: ${formatFriendlyDate(job.status_updated_at)}</span>` : ""}
         </div>
       </div>
       <div class="job-score-wrap">

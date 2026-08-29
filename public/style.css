@@ -721,3 +721,19 @@ body {
     position: static;
   }
 }
+
+/* ── Job Timestamps ── */
+.job-dates {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.date-lbl {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
